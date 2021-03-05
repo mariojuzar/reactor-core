@@ -19,12 +19,12 @@ import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import com.pivovarit.function.ThrowingRunnable;
 import org.assertj.core.data.Offset;
-import org.junit.Test;
 
 import reactor.core.Disposable;
 import reactor.core.Scannable;
@@ -35,11 +35,14 @@ import reactor.util.Logger;
 import reactor.util.Loggers;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 /**
  * @author Stephane Maldini
  * @author Simon Baslé
  */
+@SuppressWarnings("deprecation") // This is because of #newElastic() calls, to be removed in 3.5. ElasticScheduler class would then also be removed.
 public class ElasticSchedulerTest extends AbstractSchedulerTest {
 
 	private static final Logger LOGGER = Loggers.getLogger(ElasticSchedulerTest.class);
@@ -49,22 +52,34 @@ public class ElasticSchedulerTest extends AbstractSchedulerTest {
 		return Schedulers.newElastic("ElasticSchedulerTest");
 	}
 
-	@Test(expected = UnsupportedOperationException.class)
-	public void unsupportedStart() {
-		Schedulers.elastic().start();
-	}
-
-	@Test(expected = IllegalArgumentException.class)
-	public void negativeTime() throws Exception {
-		Schedulers.newElastic("test", -1);
-	}
-
 	@Override
 	protected boolean shouldCheckInterrupted() {
 		return true;
 	}
 
-	@Test(timeout = 10000)
+	@Override
+	protected boolean shouldCheckSupportRestart() {
+		return true;
+	}
+
+	@Test
+	public void bothStartAndRestartDoNotThrow() {
+		Scheduler scheduler = afterTest.autoDispose(scheduler());
+		assertThatCode(scheduler::start).as("start").doesNotThrowAnyException();
+
+		scheduler.dispose();
+		assertThatCode(scheduler::start).as("restart").doesNotThrowAnyException();
+	}
+
+	@Test
+	public void negativeTime() throws Exception {
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Schedulers.newElastic("test", -1);
+		});
+	}
+
+	@Test
+	@Timeout(10)
 	public void eviction() throws Exception {
 		Scheduler s = Schedulers.newElastic("test-recycle", 2);
 		((ElasticScheduler)s).evictor.shutdownNow();
@@ -254,16 +269,16 @@ public class ElasticSchedulerTest extends AbstractSchedulerTest {
 				    .subscribe();
 
 				if (i == 0) {
-					activeAtBeginning = Thread.activeCount() - otherThreads;
+					activeAtBeginning = Math.max(0, Thread.activeCount() - otherThreads);
 					oldActive = activeAtBeginning;
 					LOGGER.info("{} threads active in round 1/{}", activeAtBeginning, fastCount);
 				}
 				else if (i == fastCount - 1) {
-					activeAtEnd = Thread.activeCount() - otherThreads;
+					activeAtEnd = Math.max(0, Thread.activeCount() - otherThreads);
 					LOGGER.info("{} threads active in round {}/{}", activeAtEnd, i + 1, fastCount);
 				}
 				else {
-					int newActive = Thread.activeCount() - otherThreads;
+					int newActive = Math.max(0, Thread.activeCount() - otherThreads);
 					if (oldActive != newActive) {
 						oldActive = newActive;
 						LOGGER.info("{} threads active in round {}/{}", oldActive, i + 1, fastCount);

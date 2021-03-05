@@ -20,32 +20,40 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
+
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
 
 public class FluxOnBackpressureDropTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void source1Null() {
-		new FluxOnBackpressureDrop<>(null);
-	}
-
-	@Test(expected = NullPointerException.class)
-	public void source2Null() {
-		new FluxOnBackpressureDrop<>(null, v -> {
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxOnBackpressureDrop<>(null);
 		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
+	public void source2Null() {
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxOnBackpressureDrop<>(null, v -> {
+			});
+		});
+	}
+
+	@Test
 	public void onDropNull() {
-		Flux.never().onBackpressureDrop(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never().onBackpressureDrop(null);
+		});
 	}
 
 	@Test
@@ -89,33 +97,34 @@ public class FluxOnBackpressureDropTest {
 
 	@Test
 	public void someDrops() {
-		DirectProcessor<Integer> tp = DirectProcessor.create();
+		Sinks.Many<Integer> tp = Sinks.unsafe().many().multicast().directBestEffort();
 
 		AssertSubscriber<Integer> ts = AssertSubscriber.create(0);
 
 		List<Integer> drops = new ArrayList<>();
 
-		tp.onBackpressureDrop(drops::add)
+		tp.asFlux()
+		  .onBackpressureDrop(drops::add)
 		  .subscribe(ts);
 
-		tp.onNext(1);
+		tp.emitNext(1, FAIL_FAST);
 
 		ts.request(2);
 
-		tp.onNext(2);
-		tp.onNext(3);
-		tp.onNext(4);
+		tp.emitNext(2, FAIL_FAST);
+		tp.emitNext(3, FAIL_FAST);
+		tp.emitNext(4, FAIL_FAST);
 
 		ts.request(1);
 
-		tp.onNext(5);
-		tp.onComplete();
+		tp.emitNext(5, FAIL_FAST);
+		tp.emitComplete(FAIL_FAST);
 
 		ts.assertValues(2, 3, 5)
 		  .assertComplete()
 		  .assertNoError();
 
-		Assert.assertEquals(Arrays.asList(1, 4), drops);
+		assertThat(drops).containsExactly(1, 4);
 	}
 
 	@Test
@@ -145,6 +154,13 @@ public class FluxOnBackpressureDropTest {
 	}
 
 	@Test
+	public void scanOperator(){
+	    FluxOnBackpressureDrop<Integer> test = new FluxOnBackpressureDrop<>(Flux.just(1));
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxOnBackpressureDrop.DropSubscriber<Integer> test =
@@ -154,6 +170,8 @@ public class FluxOnBackpressureDropTest {
 
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+
         test.requested = 35;
         assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35);
         assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(Integer.MAX_VALUE);

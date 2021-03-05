@@ -16,40 +16,52 @@
 
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
+import reactor.test.StepVerifier;
 import reactor.test.publisher.TestPublisher;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class MonoElementAtTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void source1Null() {
-		new MonoElementAt<>(null, 1);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new MonoElementAt<>(null, 1);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void source2Null() {
-		new MonoElementAt<>(null, 1, 1);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new MonoElementAt<>(null, 1, 1);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void defaultSupplierNull() {
-		Flux.never().elementAt(1, null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never().elementAt(1, null);
+		});
 	}
 
-	@Test(expected = IndexOutOfBoundsException.class)
+	@Test
 	public void indexNegative1() {
-		Flux.never().elementAt(-1);
+		assertThatExceptionOfType(IndexOutOfBoundsException.class).isThrownBy(() -> {
+			Flux.never().elementAt(-1);
+		});
 	}
 
-	@Test(expected = IndexOutOfBoundsException.class)
+	@Test
 	public void indexNegative2() {
-		Flux.never().elementAt(-1, 1);
+		assertThatExceptionOfType(IndexOutOfBoundsException.class).isThrownBy(() -> {
+			Flux.never().elementAt(-1, 1);
+		});
 	}
 
 	@Test
@@ -137,14 +149,12 @@ public class MonoElementAtTest {
 	}
 
 	@Test
-	public void empty() {
-		AssertSubscriber<Integer> ts = AssertSubscriber.create();
-
-		Flux.<Integer>empty().elementAt(0).subscribe(ts);
-
-		ts.assertNoValues()
-		  .assertError(IndexOutOfBoundsException.class)
-		  .assertNotComplete();
+	void empty() {
+		StepVerifier.create(Flux.<Integer>empty().elementAt(0))
+		            .expectErrorSatisfies(e -> assertThat(e)
+				            .isInstanceOf(IndexOutOfBoundsException.class)
+				            .hasMessage("source had 0 elements, expected at least 1"))
+		            .verify();
 	}
 
 	@Test
@@ -207,13 +217,19 @@ public class MonoElementAtTest {
 	public void cancel() {
 		TestPublisher<String> cancelTester = TestPublisher.create();
 
-		MonoProcessor<String> processor = cancelTester.flux()
-		                                              .elementAt(1000)
-		                                              .toProcessor();
-		processor.subscribe();
-		processor.cancel();
+		StepVerifier.create(cancelTester.flux()
+										.elementAt(1000))
+					.thenCancel()
+					.verify();
 
 		cancelTester.assertCancelled();
+	}
+
+	@Test
+	public void scanOperator(){
+	    MonoElementAt<Integer> test = new MonoElementAt<>(Flux.just(1, 2, 3), 1);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -227,6 +243,7 @@ public class MonoElementAtTest {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.onError(new IllegalStateException("boom"));
@@ -235,5 +252,27 @@ public class MonoElementAtTest {
 		assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
 		test.cancel();
 		assertThat(test.scan(Scannable.Attr.CANCELLED)).isTrue();
+	}
+
+	@Test
+	void sourceShorter1() {
+		StepVerifier.create(Flux.range(1, 10)
+								.elementAt(10))
+					.expectNextCount(0)
+					.expectErrorSatisfies(e -> assertThat(e)
+							.isInstanceOf(IndexOutOfBoundsException.class)
+							.hasMessage("source had 10 elements, expected at least 11"))
+					.verify();
+	}
+
+	@Test
+	void sourceShorter2() {
+		StepVerifier.create(Flux.range(1, 10)
+								.elementAt(1000))
+					.expectNextCount(0)
+					.expectErrorSatisfies(e -> assertThat(e)
+							.isInstanceOf(IndexOutOfBoundsException.class)
+							.hasMessage("source had 10 elements, expected at least 1001"))
+					.verify();
 	}
 }

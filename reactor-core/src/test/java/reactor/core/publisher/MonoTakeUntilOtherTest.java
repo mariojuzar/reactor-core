@@ -19,7 +19,8 @@ package reactor.core.publisher;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.publisher.TestPublisher;
 import reactor.test.scheduler.VirtualTimeScheduler;
@@ -56,7 +57,7 @@ public class MonoTakeUntilOtherTest {
 		            .expectNoEvent(Duration.ofMillis(100))
 		            .verifyComplete();
 
-		assertThat(signal.get()).isEqualTo(SignalType.CANCEL);
+		assertThat(signal).hasValue(SignalType.CANCEL);
 	}
 
 	@Test
@@ -71,8 +72,8 @@ public class MonoTakeUntilOtherTest {
 		            .thenCancel()
 		            .verify(Duration.ofMillis(500));
 
-		assertThat(s1.get()).isEqualTo(SignalType.CANCEL);
-		assertThat(s2.get()).isEqualTo(SignalType.CANCEL);
+		assertThat(s1).hasValue(SignalType.CANCEL);
+		assertThat(s2).hasValue(SignalType.CANCEL);
 	}
 
 	@Test
@@ -192,4 +193,11 @@ public class MonoTakeUntilOtherTest {
 		other.assertCancelled();
 	}
 
+	@Test
+	public void scanOperator(){
+		TestPublisher<String> other = TestPublisher.create();
+	    MonoTakeUntilOther<Integer, String> test = new MonoTakeUntilOther<>(Mono.just(1), other);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
 }

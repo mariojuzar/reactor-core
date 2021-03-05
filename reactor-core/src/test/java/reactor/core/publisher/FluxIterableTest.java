@@ -22,9 +22,8 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
-
 import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
 import reactor.core.Scannable;
@@ -35,6 +34,7 @@ import reactor.util.context.Context;
 import reactor.util.function.Tuples;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxIterableTest {
 
@@ -46,9 +46,11 @@ public class FluxIterableTest {
 	                .verifyComplete();
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void nullIterable() {
-		Flux.never().zipWithIterable(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never().zipWithIterable(null);
+		});
 	}
 
 	@Test
@@ -197,8 +199,11 @@ public class FluxIterableTest {
 		FluxIterable<String> otherFlux = new FluxIterable<>(other);
 
 		assertThat(collectionFlux.scan(Scannable.Attr.BUFFERED)).as("collection").isEqualTo(3);
+		assertThat(collectionFlux.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 		assertThat(tupleFlux.scan(Scannable.Attr.BUFFERED)).as("tuple").isEqualTo(2);
+		assertThat(tupleFlux.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 		assertThat(otherFlux.scan(Scannable.Attr.BUFFERED)).as("other").isEqualTo(0);
+		assertThat(otherFlux.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -210,6 +215,7 @@ public class FluxIterableTest {
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
 		test.request(123);
 		assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(123);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.clear();
@@ -231,6 +237,7 @@ public class FluxIterableTest {
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
 		test.request(123);
 		assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(123);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.clear();

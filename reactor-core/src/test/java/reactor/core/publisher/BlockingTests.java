@@ -26,15 +26,22 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import reactor.core.Exceptions;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
+import static java.time.Duration.ofSeconds;
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static reactor.core.publisher.Flux.range;
+
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import static org.assertj.core.api.AssertionsForClassTypes.*;
 
 public class BlockingTests {
@@ -42,13 +49,13 @@ public class BlockingTests {
 	static Scheduler scheduler;
 	static Scheduler nonBlockingScheduler;
 
-	@BeforeClass
+	@BeforeAll
 	public static void before() {
 		scheduler = Schedulers.fromExecutorService(Executors.newSingleThreadExecutor());
 		nonBlockingScheduler = Schedulers.newSingle("nonBlockingScheduler");
 	}
 
-	@AfterClass
+	@AfterAll
 	public static void after() {
 		scheduler.dispose();
 		nonBlockingScheduler.dispose();
@@ -56,74 +63,95 @@ public class BlockingTests {
 
 	@Test
 	public void blockingFirst() {
-		Assert.assertEquals((Integer) 1,
-				Flux.range(1, 10)
-				    .publishOn(scheduler)
-				    .blockFirst());
+		assertThat(range(1, 10)
+				.publishOn(scheduler)
+				.blockFirst()).isEqualTo((Integer) 1);
 	}
 
 	@Test
 	public void blockingFirst2() {
-		Assert.assertEquals((Integer) 1,
-				Flux.range(1, 10)
-				    .publishOn(scheduler)
-				    .blockFirst(Duration.ofSeconds(10)));
+		assertThat(range(1, 10)
+				.publishOn(scheduler)
+				.blockFirst(ofSeconds(10))).isEqualTo((Integer) 1);
 	}
 
 	@Test
-	public void blockingFirstTimeout() {
+	public void blockingFirstEarlyComplete() {
 		assertThat(Flux.empty()
 		               .blockFirst(Duration.ofMillis(1))).isNull();
 	}
 
 	@Test
+	public void blockingFirstTimeout() {
+		assertThatIllegalStateException().isThrownBy(() ->
+				Flux.just(1).delayElements(Duration.ofSeconds(1))
+				.blockFirst(Duration.ofMillis(1)))
+			.withMessage("Timeout on blocking read for 1000000 NANOSECONDS");
+	}
+
+	@Test
 	public void blockingLast() {
-		Assert.assertEquals((Integer) 10,
-				Flux.range(1, 10)
-				    .publishOn(scheduler)
-				    .blockLast());
+		assertThat(range(1, 10)
+				.publishOn(scheduler)
+				.blockLast()).isEqualTo((Integer) 10);
 	}
 
 	@Test
 	public void blockingLast2() {
-		Assert.assertEquals((Integer) 10,
-				Flux.range(1, 10)
-				    .publishOn(scheduler)
-				    .blockLast(Duration.ofSeconds(10)));
+		assertThat(range(1, 10)
+				.publishOn(scheduler)
+				.blockLast(ofSeconds(10))).isEqualTo((Integer) 10);
 	}
 
 	@Test
-	public void blockingLastTimeout() {
+	public void blockingLastEarlyComplete() {
 		assertThat(Flux.empty()
 		               .blockLast(Duration.ofMillis(1))).isNull();
 	}
 
-	@Test(expected = RuntimeException.class)
+	@Test
+	public void blockingLastTimeout() {
+		assertThatIllegalStateException().isThrownBy(() ->
+				Flux.just(1).delayElements(Duration.ofMillis(100))
+						.blockLast(Duration.ofNanos(50)))
+				.withMessage("Timeout on blocking read for 50 NANOSECONDS");
+	}
+
+
+	@Test
 	public void blockingFirstError() {
-		Flux.error(new RuntimeException("test"))
-		    .publishOn(scheduler)
-		    .blockFirst();
+		assertThatExceptionOfType(RuntimeException.class).isThrownBy(() -> {
+			Flux.error(new RuntimeException("test"))
+					.publishOn(scheduler)
+					.blockFirst();
+		});
 	}
 
-	@Test(expected = RuntimeException.class)
+	@Test
 	public void blockingFirstError2() {
-		Flux.error(new RuntimeException("test"))
-		    .publishOn(scheduler)
-		    .blockFirst(Duration.ofSeconds(1));
+		assertThatExceptionOfType(RuntimeException.class).isThrownBy(() -> {
+			Flux.error(new RuntimeException("test"))
+					.publishOn(scheduler)
+					.blockFirst(Duration.ofSeconds(1));
+		});
 	}
 
-	@Test(expected = RuntimeException.class)
+	@Test
 	public void blockingLastError() {
-		Flux.defer(() -> Mono.error(new RuntimeException("test")))
-		    .subscribeOn(scheduler)
-		    .blockLast();
+		assertThatExceptionOfType(RuntimeException.class).isThrownBy(() -> {
+			Flux.defer(() -> Mono.error(new RuntimeException("test")))
+					.subscribeOn(scheduler)
+					.blockLast();
+		});
 	}
 
-	@Test(expected = RuntimeException.class)
+	@Test
 	public void blockingLastError2() {
-		Flux.defer(() -> Mono.error(new RuntimeException("test")))
-		    .subscribeOn(scheduler)
-		    .blockLast(Duration.ofSeconds(1));
+		assertThatExceptionOfType(RuntimeException.class).isThrownBy(() -> {
+			Flux.defer(() -> Mono.error(new RuntimeException("test")))
+					.subscribeOn(scheduler)
+					.blockLast(Duration.ofSeconds(1));
+		});
 	}
 
 	@Test
@@ -145,7 +173,7 @@ public class BlockingTests {
 		Thread.sleep(1000);
 		t.interrupt();
 
-		Assert.assertTrue("Not interrupted ?", latch.await(3, TimeUnit.SECONDS));
+		assertThat(latch.await(3, SECONDS)).as("Not interrupted ?").isTrue();
 	}
 
 	/*@Test
@@ -200,7 +228,7 @@ public class BlockingTests {
 	        .doOnCancel(cancelCount::incrementAndGet)
 	        .blockFirst();
 
-		assertThat(cancelCount.get()).isEqualTo(1);
+		assertThat(cancelCount).hasValue(1);
 	}
 
 	@Test
@@ -210,7 +238,7 @@ public class BlockingTests {
 	        .doOnCancel(cancelCount::incrementAndGet)
 	        .blockLast();
 
-		assertThat(cancelCount.get()).isEqualTo(0);
+		assertThat(cancelCount).hasValue(0);
 	}
 
 	@Test
@@ -220,7 +248,7 @@ public class BlockingTests {
 	        .doOnCancel(cancelCount::incrementAndGet)
 	        .block();
 
-		assertThat(cancelCount.get()).isEqualTo(0);
+		assertThat(cancelCount).hasValue(0);
 	}
 
 	@Test
@@ -230,7 +258,13 @@ public class BlockingTests {
 	        .doOnCancel(cancelCount::incrementAndGet)
 	        .blockOptional();
 
-		assertThat(cancelCount.get()).isEqualTo(0);
+		assertThat(cancelCount).hasValue(0);
+	}
+
+	@Test
+	public void monoBlockSupportsNanos() {
+		assertThatIllegalStateException().isThrownBy(() -> Mono.never().block(Duration.ofNanos(9_000L)))
+				.withMessage("Timeout on blocking read for 9000 NANOSECONDS");
 	}
 
 	@Test

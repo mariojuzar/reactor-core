@@ -97,8 +97,8 @@ public class MemoryUtils {
 
 
 		public OffHeapDetector() {
+			//note: AssertJ representation of Tracked is installed in ReactorTestExecutionListener
 			tracker = new ConcurrentLinkedQueue<>();
-			AssertionsUtils.installAssertJTestRepresentation();
 		}
 
 		/**
@@ -165,6 +165,11 @@ public class MemoryUtils {
 	public static final class Tracked extends AtomicBoolean {
 
 		/**
+		 * A pre-released {@link Tracked} instance for convenience in some tests.
+		 */
+		public static final Tracked RELEASED = new Tracked("RELEASED", true);
+
+		/**
 		 * Check if an arbitrary object is a {@link Tracked}, and if so release it.
 		 *
 		 * @param t the arbitrary object
@@ -182,6 +187,11 @@ public class MemoryUtils {
 
 	    Tracked(String identifier) {
 	        this.identifier = identifier;
+	    }
+
+	    Tracked(String identifier, boolean preReleased) {
+	    	this.identifier = identifier;
+	    	set(preReleased);
 	    }
 
 		/**

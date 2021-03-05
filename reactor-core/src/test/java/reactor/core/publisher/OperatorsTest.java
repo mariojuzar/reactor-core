@@ -16,7 +16,6 @@
 
 package reactor.core.publisher;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -37,7 +36,7 @@ import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
@@ -52,9 +51,10 @@ import reactor.core.publisher.Operators.EmptySubscription;
 import reactor.core.publisher.Operators.MonoSubscriber;
 import reactor.core.publisher.Operators.MultiSubscriptionSubscriber;
 import reactor.core.publisher.Operators.ScalarSubscription;
-import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
+import reactor.test.util.LoggerUtils;
 import reactor.test.util.RaceTestUtils;
+import reactor.test.util.TestLogger;
 import reactor.util.context.Context;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -289,11 +289,14 @@ public class OperatorsTest {
 
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
 
-		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
-		assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).as("TERMINATED when initially filled").isFalse();
+		assertThat(test.scan(Scannable.Attr.CANCELLED)).as("CANCELLED when initially filled").isFalse();
 		test.poll();
-		assertThat(test.scan(Scannable.Attr.TERMINATED)).isTrue();
-		assertThat(test.scan(Scannable.Attr.CANCELLED)).isTrue();
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).as("TERMINATED after poll").isTrue();
+		assertThat(test.scan(Scannable.Attr.CANCELLED)).as("CANCELLED after poll").isFalse();
+		test.cancel();
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).as("TERMINATED after cancel").isFalse();
+		assertThat(test.scan(Scannable.Attr.CANCELLED)).as("CANCELLED after cancel").isTrue();
 	}
 
 	@Test
@@ -354,7 +357,7 @@ public class OperatorsTest {
 
 		Operators.onNextDropped("foo", c);
 
-		assertThat(hookState.get()).isEqualTo("foo");
+		assertThat(hookState).hasValue("foo");
 	}
 
 	@Test
@@ -971,5 +974,47 @@ public class OperatorsTest {
 		Operators.reportThrowInSubscribe(fuseableSubscriber, new RuntimeException("boom"));
 
 		assertSubscriber.assertNoError().awaitAndAssertNextValues(123);
+	}
+
+	@Test
+	public void onDiscardCallbackErrorsLog() {
+		Context context = Operators.enableOnDiscard(Context.empty(), t -> {
+			throw new RuntimeException("Boom");
+		});
+
+		TestLogger testLogger = new TestLogger();
+		LoggerUtils.enableCaptureWith(testLogger);
+		try {
+			Operators.onDiscard("Foo", context);
+			assertThat(testLogger.getErrContent()).contains("Error in discard hook - java.lang.RuntimeException: Boom");
+		}
+		finally {
+			LoggerUtils.disableCapture();
+		}
+	}
+	
+	@Test
+	void meaningfulEmptySubscriptionStepName() {
+		assertThat(Scannable.from(Operators.emptySubscription()).stepName()).isEqualTo("emptySubscription");
+	}
+
+	@Test
+	void meaningfulCancelledSubscriptionStepName() {
+		assertThat(Scannable.from(Operators.cancelledSubscription()).stepName()).isEqualTo("cancelledSubscription");
+	}
+
+	@Test
+	void meaningfulScalarSubscriptionStepName() {
+		assertThat(Scannable.from(Operators.scalarSubscription(new BlockingFirstSubscriber<>(), "foo")).stepName()).isEqualTo("scalarSubscription(foo)");
+	}
+
+	@Test
+	void drainSubscriberNotScannableStepName() {
+		assertThat(Scannable.from(Operators.drainSubscriber()).stepName()).isEqualTo("UNAVAILABLE_SCAN");
+	}
+
+	@Test
+	void emptySubscriberNotScannableStepName() {
+		assertThat(Scannable.from(Operators.emptySubscriber()).stepName()).isEqualTo("UNAVAILABLE_SCAN");
 	}
 }

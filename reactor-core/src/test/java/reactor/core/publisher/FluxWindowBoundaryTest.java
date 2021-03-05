@@ -21,10 +21,10 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
+
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
@@ -32,6 +32,7 @@ import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.concurrent.Queues;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
 
 public class FluxWindowBoundaryTest {
 
@@ -53,24 +54,25 @@ public class FluxWindowBoundaryTest {
 	public void normal() {
 		AssertSubscriber<Flux<Integer>> ts = AssertSubscriber.create();
 
-		DirectProcessor<Integer> sp1 = DirectProcessor.create();
-		DirectProcessor<Integer> sp2 = DirectProcessor.create();
+		Sinks.Many<Integer> sp1 = Sinks.unsafe().many().multicast().directBestEffort();
+		Sinks.Many<Integer> sp2 = Sinks.unsafe().many().multicast().directBestEffort();
 
-		sp1.window(sp2)
+		sp1.asFlux()
+		   .window(sp2.asFlux())
 		   .subscribe(ts);
 
 		ts.assertValueCount(1);
 
-		sp1.onNext(1);
-		sp1.onNext(2);
-		sp1.onNext(3);
+		sp1.emitNext(1, FAIL_FAST);
+		sp1.emitNext(2, FAIL_FAST);
+		sp1.emitNext(3, FAIL_FAST);
 
-		sp2.onNext(1);
+		sp2.emitNext(1, FAIL_FAST);
 
-		sp1.onNext(4);
-		sp1.onNext(5);
+		sp1.emitNext(4, FAIL_FAST);
+		sp1.emitNext(5, FAIL_FAST);
 
-		sp1.onComplete();
+		sp1.emitComplete(FAIL_FAST);
 
 		ts.assertValueCount(2);
 
@@ -80,32 +82,33 @@ public class FluxWindowBoundaryTest {
 		ts.assertNoError()
 		  .assertComplete();
 
-		Assert.assertFalse("sp1 has subscribers", sp1.hasDownstreams());
-		Assert.assertFalse("sp2 has subscribers", sp1.hasDownstreams());
+		assertThat(sp1.currentSubscriberCount()).as("sp1 has subscriber").isZero();
+		assertThat(sp2.currentSubscriberCount()).as("sp2 has subscriber").isZero();
 	}
 
 	@Test
 	public void normalOtherCompletes() {
 		AssertSubscriber<Flux<Integer>> ts = AssertSubscriber.create();
 
-		DirectProcessor<Integer> sp1 = DirectProcessor.create();
-		DirectProcessor<Integer> sp2 = DirectProcessor.create();
+		Sinks.Many<Integer> sp1 = Sinks.unsafe().many().multicast().directBestEffort();
+		Sinks.Many<Integer> sp2 = Sinks.unsafe().many().multicast().directBestEffort();
 
-		sp1.window(sp2)
+		sp1.asFlux()
+		   .window(sp2.asFlux())
 		   .subscribe(ts);
 
 		ts.assertValueCount(1);
 
-		sp1.onNext(1);
-		sp1.onNext(2);
-		sp1.onNext(3);
+		sp1.emitNext(1, FAIL_FAST);
+		sp1.emitNext(2, FAIL_FAST);
+		sp1.emitNext(3, FAIL_FAST);
 
-		sp2.onNext(1);
+		sp2.emitNext(1, FAIL_FAST);
 
-		sp1.onNext(4);
-		sp1.onNext(5);
+		sp1.emitNext(4, FAIL_FAST);
+		sp1.emitNext(5, FAIL_FAST);
 
-		sp2.onComplete();
+		sp2.emitComplete(FAIL_FAST);
 
 		ts.assertValueCount(2);
 
@@ -115,32 +118,33 @@ public class FluxWindowBoundaryTest {
 		ts.assertNoError()
 		  .assertComplete();
 
-		Assert.assertFalse("sp1 has subscribers", sp1.hasDownstreams());
-		Assert.assertFalse("sp2 has subscribers", sp1.hasDownstreams());
+		assertThat(sp1.currentSubscriberCount()).as("sp1 has subscriber").isZero();
+		assertThat(sp2.currentSubscriberCount()).as("sp2 has subscriber").isZero();
 	}
 
 	@Test
 	public void mainError() {
 		AssertSubscriber<Flux<Integer>> ts = AssertSubscriber.create();
 
-		DirectProcessor<Integer> sp1 = DirectProcessor.create();
-		DirectProcessor<Integer> sp2 = DirectProcessor.create();
+		Sinks.Many<Integer> sp1 = Sinks.unsafe().many().multicast().directBestEffort();
+		Sinks.Many<Integer> sp2 = Sinks.unsafe().many().multicast().directBestEffort();
 
-		sp1.window(sp2)
+		sp1.asFlux()
+		   .window(sp2.asFlux())
 		   .subscribe(ts);
 
 		ts.assertValueCount(1);
 
-		sp1.onNext(1);
-		sp1.onNext(2);
-		sp1.onNext(3);
+		sp1.emitNext(1, FAIL_FAST);
+		sp1.emitNext(2, FAIL_FAST);
+		sp1.emitNext(3, FAIL_FAST);
 
-		sp2.onNext(1);
+		sp2.emitNext(1, FAIL_FAST);
 
-		sp1.onNext(4);
-		sp1.onNext(5);
+		sp1.emitNext(4, FAIL_FAST);
+		sp1.emitNext(5, FAIL_FAST);
 
-		sp1.onError(new RuntimeException("forced failure"));
+		sp1.emitError(new RuntimeException("forced failure"), FAIL_FAST);
 
 		ts.assertValueCount(2);
 
@@ -156,32 +160,33 @@ public class FluxWindowBoundaryTest {
 		  .assertErrorMessage("forced failure")
 		  .assertNotComplete();
 
-		Assert.assertFalse("sp1 has subscribers", sp1.hasDownstreams());
-		Assert.assertFalse("sp2 has subscribers", sp1.hasDownstreams());
+		assertThat(sp1.currentSubscriberCount()).as("sp1 has subscriber").isZero();
+		assertThat(sp2.currentSubscriberCount()).as("sp2 has subscriber").isZero();
 	}
 
 	@Test
 	public void otherError() {
 		AssertSubscriber<Flux<Integer>> ts = AssertSubscriber.create();
 
-		DirectProcessor<Integer> sp1 = DirectProcessor.create();
-		DirectProcessor<Integer> sp2 = DirectProcessor.create();
+		Sinks.Many<Integer> sp1 = Sinks.unsafe().many().multicast().directBestEffort();
+		Sinks.Many<Integer> sp2 = Sinks.unsafe().many().multicast().directBestEffort();
 
-		sp1.window(sp2)
+		sp1.asFlux()
+		   .window(sp2.asFlux())
 		   .subscribe(ts);
 
 		ts.assertValueCount(1);
 
-		sp1.onNext(1);
-		sp1.onNext(2);
-		sp1.onNext(3);
+		sp1.emitNext(1, FAIL_FAST);
+		sp1.emitNext(2, FAIL_FAST);
+		sp1.emitNext(3, FAIL_FAST);
 
-		sp2.onNext(1);
+		sp2.emitNext(1, FAIL_FAST);
 
-		sp1.onNext(4);
-		sp1.onNext(5);
+		sp1.emitNext(4, FAIL_FAST);
+		sp1.emitNext(5, FAIL_FAST);
 
-		sp2.onError(new RuntimeException("forced failure"));
+		sp2.emitError(new RuntimeException("forced failure"), FAIL_FAST);
 
 		ts.assertValueCount(2);
 
@@ -197,8 +202,8 @@ public class FluxWindowBoundaryTest {
 		  .assertErrorMessage("forced failure")
 		  .assertNotComplete();
 
-		Assert.assertFalse("sp1 has subscribers", sp1.hasDownstreams());
-		Assert.assertFalse("sp2 has subscribers", sp1.hasDownstreams());
+		assertThat(sp1.currentSubscriberCount()).as("sp1 has subscriber").isZero();
+		assertThat(sp2.currentSubscriberCount()).as("sp2 has subscriber").isZero();
 	}
 
 
@@ -223,28 +228,36 @@ public class FluxWindowBoundaryTest {
 	@Test
 	public void windowWillAccumulateMultipleListsOfValues() {
 		//given: "a source and a collected flux"
-		EmitterProcessor<Integer> numbers = EmitterProcessor.create();
+		Sinks.Many<Integer> numbers = Sinks.many().multicast().onBackpressureBuffer();
 
 		//non overlapping buffers
-		EmitterProcessor<Integer> boundaryFlux = EmitterProcessor.create();
+		Sinks.Many<Integer> boundaryFlux = Sinks.many().multicast().onBackpressureBuffer();
 
-		MonoProcessor<List<List<Integer>>> res = numbers.window(boundaryFlux)
-		                                       .concatMap(Flux::buffer)
-		                                       .buffer()
-		                                       .publishNext()
-		                                       .toProcessor();
-		res.subscribe();
+		StepVerifier.create(numbers.asFlux()
+								   .window(boundaryFlux.asFlux())
+								   .concatMap(Flux::buffer)
+								   .collectList())
+					.then(() -> {
+						numbers.emitNext(1, FAIL_FAST);
+						numbers.emitNext(2, FAIL_FAST);
+						numbers.emitNext(3, FAIL_FAST);
+						boundaryFlux.emitNext(1, FAIL_FAST);
+						numbers.emitNext(5, FAIL_FAST);
+						numbers.emitNext(6, FAIL_FAST);
+						numbers.emitComplete(FAIL_FAST);
+						//"the collected lists are available"
+					})
+					.assertNext(res -> assertThat(res).containsExactly(Arrays.asList(1, 2, 3), Arrays.asList(5, 6)))
+					.verifyComplete();
+	}
 
-		numbers.onNext(1);
-		numbers.onNext(2);
-		numbers.onNext(3);
-		boundaryFlux.onNext(1);
-		numbers.onNext(5);
-		numbers.onNext(6);
-		numbers.onComplete();
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxWindowBoundary<Integer, Integer> test = new FluxWindowBoundary<>(parent, Flux.just(2), Queues.empty());
 
-		//"the collected lists are available"
-		assertThat(res.block()).containsExactly(Arrays.asList(1, 2, 3), Arrays.asList(5, 6));
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -257,6 +270,7 @@ public class FluxWindowBoundaryTest {
 
 		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 		Assertions.assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(Integer.MAX_VALUE);
 		test.requested = 35;
 		Assertions.assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35);
@@ -288,6 +302,7 @@ public class FluxWindowBoundaryTest {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(main);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
         test.requested = 35;
         Assertions.assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35);
 

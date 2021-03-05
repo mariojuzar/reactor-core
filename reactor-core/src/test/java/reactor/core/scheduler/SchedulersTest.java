@@ -36,29 +36,30 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
-import org.assertj.core.api.Assertions;
 import org.assertj.core.api.Condition;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import reactor.core.Disposable;
 import reactor.core.Disposables;
 import reactor.core.Exceptions;
 import reactor.core.Scannable;
-import reactor.core.publisher.DirectProcessor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.awaitility.Awaitility.await;
-import static org.junit.Assert.fail;
+import static org.assertj.core.api.Assertions.fail;
+import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
 
 public class SchedulersTest {
 
 	final static class TestSchedulers implements Schedulers.Factory {
 
+		@SuppressWarnings("deprecation") // to be removed with newElastic() in 3.5
 		final Scheduler elastic        = Schedulers.Factory.super.newElastic(60, Thread::new);
 		final Scheduler boundedElastic = Schedulers.Factory.super.newBoundedElastic(2, Integer.MAX_VALUE, Thread::new, 60);
 		final Scheduler single         = Schedulers.Factory.super.newSingle(Thread::new);
@@ -74,6 +75,7 @@ public class SchedulersTest {
 		}
 
 		@Override
+		@SuppressWarnings("deprecation") // to be removed with newElastic() in 3.5
 		public final Scheduler newElastic(int ttlSeconds, ThreadFactory threadFactory) {
 			assertThat(((ReactorThreadFactory)threadFactory).get()).isEqualTo("unused");
 			return elastic;
@@ -101,7 +103,9 @@ public class SchedulersTest {
 	final static Condition<Scheduler> CACHED_SCHEDULER = new Condition<>(
 			s -> s instanceof Schedulers.CachedScheduler, "a cached scheduler");
 
-	@After
+	private final AtomicReference<Throwable> exceptionThrown = new AtomicReference<>();
+
+	@AfterEach
 	public void resetSchedulers() {
 		Schedulers.resetFactory();
 		Schedulers.DECORATORS.clear();
@@ -328,6 +332,7 @@ public class SchedulersTest {
 
 	@Test
 	public void elasticSchedulerDefaultBlockingOk() throws InterruptedException {
+		@SuppressWarnings("deprecation") // to be removed with newElastic() in 3.5
 		Scheduler scheduler = Schedulers.newElastic("elasticSchedulerDefaultNonBlocking");
 		CountDownLatch latch = new CountDownLatch(1);
 		AtomicReference<Throwable> errorRef = new AtomicReference<>();
@@ -534,17 +539,19 @@ public class SchedulersTest {
 		TestSchedulers ts = new TestSchedulers(true);
 		Schedulers.setFactory(ts);
 
-		Assert.assertEquals(ts.single, Schedulers.newSingle("unused"));
-		Assert.assertEquals(ts.elastic, Schedulers.newElastic("unused"));
-		Assert.assertEquals(ts.boundedElastic, Schedulers.newBoundedElastic(4, Integer.MAX_VALUE, "unused"));
-		Assert.assertEquals(ts.parallel, Schedulers.newParallel("unused"));
+		assertThat(Schedulers.newSingle("unused")).isEqualTo(ts.single);
+		@SuppressWarnings("deprecation") // to be removed with newElastic() in 3.5
+		Scheduler elastic = Schedulers.newElastic("unused");
+		assertThat(elastic).isEqualTo(ts.elastic);
+		assertThat(Schedulers.newBoundedElastic(4, Integer.MAX_VALUE, "unused")).isEqualTo(ts.boundedElastic);
+		assertThat(Schedulers.newParallel("unused")).isEqualTo(ts.parallel);
 
 		Schedulers.resetFactory();
 
 		Scheduler s = Schedulers.newSingle("unused");
 		s.dispose();
 
-		Assert.assertNotSame(ts.single, s);
+		assertThat(s).isNotSameAs(ts.single);
 	}
 
 	@Test
@@ -556,27 +563,27 @@ public class SchedulersTest {
 		Scheduler standaloneTimer = Schedulers.newSingle("standaloneTimer");
 
 
-		Assert.assertNotSame(cachedTimerOld, standaloneTimer);
-		Assert.assertNotNull(cachedTimerOld.schedule(() -> {}));
-		Assert.assertNotNull(standaloneTimer.schedule(() -> {}));
+		assertThat(standaloneTimer).isNotSameAs(cachedTimerOld);
+		assertThat(cachedTimerOld.schedule(() -> {})).isNotNull();
+		assertThat(standaloneTimer.schedule(() -> {})).isNotNull();
 
 		Schedulers.setFactory(ts2);
 		Scheduler cachedTimerNew = Schedulers.newSingle("unused");
 
-		Assert.assertEquals(cachedTimerNew, Schedulers.newSingle("unused"));
-		Assert.assertNotSame(cachedTimerNew, cachedTimerOld);
+		assertThat(Schedulers.newSingle("unused")).isEqualTo(cachedTimerNew);
+		assertThat(cachedTimerOld).isNotSameAs(cachedTimerNew);
 		//assert that the old factory"s cached scheduler was shut down
-		Assertions.assertThatExceptionOfType(RejectedExecutionException.class)
-		          .isThrownBy(() -> cachedTimerOld.schedule(() -> {}));
+		assertThatExceptionOfType(RejectedExecutionException.class).isThrownBy(() -> cachedTimerOld.schedule(() -> { }));
 		//independently created schedulers are still the programmer"s responsibility
-		Assert.assertNotNull(standaloneTimer.schedule(() -> {}));
+		assertThat(standaloneTimer.schedule(() -> {})).isNotNull();
 		//new factory = new alive cached scheduler
-		Assert.assertNotNull(cachedTimerNew.schedule(() -> {}));
+		assertThat(cachedTimerNew.schedule(() -> {})).isNotNull();
 	}
 
 	@Test
 	public void shutdownNowClosesAllCachedSchedulers() {
 		Scheduler oldSingle = Schedulers.single();
+		@SuppressWarnings("deprecation") // to be removed with newElastic() in 3.5
 		Scheduler oldElastic = Schedulers.elastic();
 		Scheduler oldBoundedElastic = Schedulers.boundedElastic();
 		Scheduler oldParallel = Schedulers.parallel();
@@ -599,7 +606,7 @@ public class SchedulersTest {
 		} finally {
 			Schedulers.resetOnHandleError();
 		}
-		Assert.assertTrue("errorCallbackNotImplemented not handled", handled.get());
+		assertThat(handled.get()).as("errorCallbackNotImplemented not handled").isTrue();
 	}
 
 	@Test
@@ -612,7 +619,7 @@ public class SchedulersTest {
 		} finally {
 			Schedulers.resetOnHandleError();
 		}
-		Assert.assertTrue("IllegalArgumentException not handled", handled.get());
+		assertThat(handled.get()).as("IllegalArgumentException not handled").isTrue();
 	}
 
 	@Test
@@ -654,20 +661,21 @@ public class SchedulersTest {
 		assertRejectingScheduler(Schedulers.fromExecutorService(Executors.newSingleThreadExecutor()));
 	}
 
-	public void assertRejectingScheduler(Scheduler scheduler) {
+	private void assertRejectingScheduler(Scheduler scheduler) {
 		try {
-			DirectProcessor<String> p = DirectProcessor.create();
+			Sinks.Many<String> p = Sinks.unsafe().many().multicast().directBestEffort();
 
 			AtomicReference<String> r = new AtomicReference<>();
 			CountDownLatch l = new CountDownLatch(1);
 
-			p.publishOn(scheduler)
+			p.asFlux()
+			 .publishOn(scheduler)
 			 .log()
 			 .subscribe(r::set, null, l::countDown);
 
 			scheduler.dispose();
 
-			p.onNext("reject me");
+			p.emitNext("reject me", FAIL_FAST);
 			l.await(3, TimeUnit.SECONDS);
 		}
 		catch (Exception ree) {
@@ -682,10 +690,6 @@ public class SchedulersTest {
 			scheduler.dispose();
 		}
 	}
-
-	//private final int             BUFFER_SIZE     = 8;
-	private final AtomicReference<Throwable> exceptionThrown = new AtomicReference<>();
-	private final int                        N               = 17;
 
 	@Test
 	public void testDispatch() throws Exception {
@@ -722,8 +726,8 @@ public class SchedulersTest {
 
 		serviceRB.dispose();
 
-		Assert.assertTrue("Event missed", latch.intValue() == 0);
-		Assert.assertTrue("Timeout too long", (end - start) >= 1000);
+		assertThat(latch.intValue() == 0).as("Event missed").isTrue();
+		assertThat((end - start) >= 1000).as("Timeout too long").isTrue();
 	}
 
 	@Test
@@ -750,8 +754,8 @@ public class SchedulersTest {
 		long end = System.currentTimeMillis();
 
 
-		Assert.assertTrue("Task not skipped", latch.intValue() == 1);
-		Assert.assertTrue("Timeout too long", (end - start) >= 1000);
+		assertThat(latch.intValue() == 1).as("Task not skipped").isTrue();
+		assertThat((end - start) >= 1000).as("Timeout too long").isTrue();
 	}
 
 	@Test
@@ -768,10 +772,10 @@ public class SchedulersTest {
 			dispatcher.schedule(() -> { t2[0] = Thread.currentThread(); cdl.countDown(); });
 
 			if (!cdl.await(5, TimeUnit.SECONDS)) {
-				Assert.fail("single timed out");
+				fail("single timed out");
 			}
 
-			Assert.assertNotSame(t1, t2[0]);
+			assertThat(t2[0]).isNotSameAs(t1);
 		} finally {
 			dispatcher.dispose();
 		}
@@ -860,7 +864,8 @@ public class SchedulersTest {
 	}
 
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void parallelSchedulerThreadCheck() throws Exception{
 		Scheduler s = Schedulers.newParallel("work", 2);
 		try {
@@ -884,7 +889,8 @@ public class SchedulersTest {
 		}
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void singleSchedulerThreadCheck() throws Exception{
 		Scheduler s = Schedulers.newSingle("work");
 		try {
@@ -909,8 +915,10 @@ public class SchedulersTest {
 	}
 
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void elasticSchedulerThreadCheck() throws Exception{
+		@SuppressWarnings("deprecation") // to be removed with newElastic() in 3.5
 		Scheduler s = Schedulers.newElastic("work");
 		try {
 			Scheduler.Worker w = s.createWorker();
@@ -933,7 +941,8 @@ public class SchedulersTest {
 		}
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void boundedElasticSchedulerThreadCheck() throws Exception {
 		Scheduler s = Schedulers.newBoundedElastic(4, Integer.MAX_VALUE,"boundedElasticSchedulerThreadCheck");
 		try {
@@ -957,7 +966,8 @@ public class SchedulersTest {
 		}
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void executorThreadCheck() throws Exception{
 		ExecutorService es = Executors.newSingleThreadExecutor();
 		Scheduler s = Schedulers.fromExecutor(es::execute);
@@ -984,7 +994,8 @@ public class SchedulersTest {
 		}
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void executorThreadCheck2() throws Exception{
 		ExecutorService es = Executors.newSingleThreadExecutor();
 		Scheduler s = Schedulers.fromExecutor(es::execute, true);
@@ -1011,7 +1022,8 @@ public class SchedulersTest {
 		}
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void sharedSingleCheck() throws Exception{
 		Scheduler p = Schedulers.newParallel("shared");
 		Scheduler s = Schedulers.single(p);
@@ -1111,6 +1123,11 @@ public class SchedulersTest {
 	}
 
 	@Test
+	public void restartBoundedElastic() {
+		restart(Schedulers.newBoundedElastic(1, 10, "test"));
+	}
+
+	@Test
 	public void restartSingle(){
 		restart(Schedulers.newSingle("test"));
 	}
@@ -1149,21 +1166,24 @@ public class SchedulersTest {
 		EmptyTimedScheduler.EmptyTimedWorker tw = ts.createWorker();
 		tw.dispose();
 
-		long before = System.currentTimeMillis();
+		long beforeInNanos = System.nanoTime();
+		long beforeInMillis = System.currentTimeMillis();
 
-		assertThat(ts.now(TimeUnit.MILLISECONDS)).isGreaterThanOrEqualTo(before)
-		                                         .isLessThanOrEqualTo(System.currentTimeMillis());
+		assertThat(ts.now(TimeUnit.NANOSECONDS)).isGreaterThanOrEqualTo(beforeInNanos)
+		                                         .isLessThanOrEqualTo(System.nanoTime());
 
-//		assertThat(tw.now(TimeUnit.MILLISECONDS)).isGreaterThanOrEqualTo(before)
-//		                                        .isLessThanOrEqualTo(System.currentTimeMillis());
+		assertThat(ts.now(TimeUnit.MILLISECONDS)).isGreaterThanOrEqualTo(beforeInMillis)
+		                                        .isLessThanOrEqualTo(System.currentTimeMillis());
 
 		//noop
 		new Schedulers(){
 
 		};
 
+		@SuppressWarnings("deprecation") // to be removed in 3.5 alongside Schedulers.elastic()
+		Scheduler elastic = Schedulers.elastic();
 		//noop
-		Schedulers.elastic().dispose();
+		elastic.dispose();
 	}
 
 	@Test
@@ -1241,41 +1261,6 @@ public class SchedulersTest {
 			unsupportedScheduledExecutorService.shutdownNow();
 			threadPool.shutdownNow();
 			scheduledThreadPool.shutdownNow();
-		}
-	}
-
-	final static class EmptyScheduler implements Scheduler {
-
-		boolean disposeCalled;
-
-		@Override
-		public void dispose() {
-			disposeCalled = true;
-		}
-
-		@Override
-		public Disposable schedule(Runnable task) {
-			return null;
-		}
-
-		@Override
-		public EmptyWorker createWorker() {
-			return new EmptyWorker();
-		}
-
-		static class EmptyWorker implements Worker {
-
-			boolean disposeCalled;
-
-			@Override
-			public Disposable schedule(Runnable task) {
-				return null;
-			}
-
-			@Override
-			public void dispose() {
-				disposeCalled = true;
-			}
 		}
 	}
 
@@ -1436,6 +1421,43 @@ public class SchedulersTest {
 		}
 	}
 
+	// === utility classes ===
+
+	final static class EmptyScheduler implements Scheduler {
+
+		boolean disposeCalled;
+
+		@Override
+		public void dispose() {
+			disposeCalled = true;
+		}
+
+		@Override
+		public Disposable schedule(Runnable task) {
+			return null;
+		}
+
+		@Override
+		public EmptyWorker createWorker() {
+			return new EmptyWorker();
+		}
+
+		static class EmptyWorker implements Worker {
+
+			boolean disposeCalled;
+
+			@Override
+			public Disposable schedule(Runnable task) {
+				return null;
+			}
+
+			@Override
+			public void dispose() {
+				disposeCalled = true;
+			}
+		}
+	}
+
 	final static class TaskCheckingScheduledExecutor extends ScheduledThreadPoolExecutor implements AutoCloseable {
 
 		private final List<RunnableScheduledFuture<?>> tasks = new CopyOnWriteArrayList<>();
@@ -1491,14 +1513,6 @@ public class SchedulersTest {
 		public Disposable schedule(Runnable task, long delay, TimeUnit unit) {
 			return null;
 		}
-
-//		@Override
-//		public Disposable schedulePeriodically(Runnable task,
-//				long initialDelay,
-//				long period,
-//				TimeUnit unit) {
-//			return null;
-//		}
 
 		@Override
 		public EmptyTimedWorker createWorker() {

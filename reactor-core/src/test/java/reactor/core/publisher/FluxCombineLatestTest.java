@@ -21,9 +21,10 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
+
 import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
 import reactor.core.Scannable;
@@ -33,6 +34,7 @@ import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.concurrent.Queues;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
 
 public class FluxCombineLatestTest extends FluxOperatorTest<String, String> {
 
@@ -106,6 +108,7 @@ public class FluxCombineLatestTest extends FluxOperatorTest<String, String> {
 						Flux.never())).shouldHitDropNextHookAfterTerminate(false));
 	}
 
+	//FIXME these tests are weird, no way to ensure which source produces the data
 	@Override
 	protected List<Scenario<String, String>> scenarios_operatorSuccess() {
 		return Arrays.asList(scenario(f -> Flux.combineLatest(o -> (String) o[0],
@@ -157,26 +160,26 @@ public class FluxCombineLatestTest extends FluxOperatorTest<String, String> {
 
 	@Test
 	public void fused() {
-		DirectProcessor<Integer> dp1 = DirectProcessor.create();
-		DirectProcessor<Integer> dp2 = DirectProcessor.create();
+		Sinks.Many<Integer> dp1 = Sinks.unsafe().many().multicast().directBestEffort();
+		Sinks.Many<Integer> dp2 = Sinks.unsafe().many().multicast().directBestEffort();
 
 		AssertSubscriber<Integer> ts = AssertSubscriber.create();
 		ts.requestedFusionMode(Fuseable.ANY);
 
-		Flux.combineLatest(dp1, dp2, (a, b) -> a + b)
+		Flux.combineLatest(dp1.asFlux(), dp2.asFlux(), (a, b) -> a + b)
 		    .subscribe(ts);
 
-		dp1.onNext(1);
-		dp1.onNext(2);
+		dp1.emitNext(1, FAIL_FAST);
+		dp1.emitNext(2, FAIL_FAST);
 
-		dp2.onNext(10);
-		dp2.onNext(20);
-		dp2.onNext(30);
+		dp2.emitNext(10, FAIL_FAST);
+		dp2.emitNext(20, FAIL_FAST);
+		dp2.emitNext(30, FAIL_FAST);
 
-		dp1.onNext(3);
+		dp1.emitNext(3, FAIL_FAST);
 
-		dp1.onComplete();
-		dp2.onComplete();
+		dp1.emitComplete(FAIL_FAST);
+		dp2.emitComplete(FAIL_FAST);
 
 		ts.assertFuseableSource()
 		  .assertFusionMode(Fuseable.ASYNC)
@@ -262,6 +265,7 @@ public class FluxCombineLatestTest extends FluxOperatorTest<String, String> {
 	public void scanOperator() {
 		FluxCombineLatest s = new FluxCombineLatest<>(Collections.emptyList(), v -> v, Queues.small(), 123);
 		assertThat(s.scan(Scannable.Attr.PREFETCH)).isEqualTo(123);
+		assertThat(s.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -298,6 +302,7 @@ public class FluxCombineLatestTest extends FluxOperatorTest<String, String> {
 		assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(789);
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(main);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
 		test.cancel();

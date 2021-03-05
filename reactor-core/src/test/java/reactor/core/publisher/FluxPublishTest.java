@@ -23,10 +23,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.reactivestreams.Subscription;
-
 import reactor.core.Disposable;
 import reactor.core.Scannable;
 import reactor.core.scheduler.Schedulers;
@@ -36,8 +35,11 @@ import reactor.test.publisher.TestPublisher;
 import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.concurrent.Queues;
 import reactor.util.context.Context;
+import reactor.util.context.ContextView;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
 
 public class FluxPublishTest extends FluxOperatorTest<String, String> {
 
@@ -55,26 +57,27 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 		);
 	}
 
-	@Test(expected = IllegalArgumentException.class)
-	public void failPrefetch(){
-		Flux.never()
-		    .publish( -1);
+	@Test
+	public void failPrefetch() {
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Flux.never()
+					.publish(-1);
+		});
 	}
 
 	@Test
 	public void prematureOnComplete() {
-		EmitterProcessor<Flux<String>> incomingProcessor = EmitterProcessor.create(false);
+		Sinks.Many<Flux<String>> sink = Sinks.unsafe().many().multicast().onBackpressureBuffer(Queues.SMALL_BUFFER_SIZE, false);
 
 		Flux.just("ALPHA", "BRAVO", "CHARLIE", "DELTA", "ALPHA", "BRAVO", "CHARLIE", "DELTA", "ALPHA", "BRAVO", "CHARLIE", "DELTA")
 		    .log("stream.incoming")
 		    .windowWhile(s -> !"DELTA".equals(s),1 )
-		    .subscribe(incomingProcessor);
+		    .subscribe(v -> sink.emitNext(v, FAIL_FAST), e -> sink.emitError(e, FAIL_FAST), () -> sink.emitComplete(FAIL_FAST));
 
 		AtomicInteger windowIndex = new AtomicInteger(0);
 		AtomicInteger nextIndex = new AtomicInteger(0);
 
-		System.out.println("ZERO");
-		incomingProcessor
+		sink.asFlux()
 				.next()
 				.flatMapMany(flux -> flux
 						.takeWhile(s -> !"CHARLIE".equals(s))
@@ -84,8 +87,7 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 				.expectNextCount(2)
 				.verifyComplete();
 
-		System.out.println("ONE");
-		incomingProcessor.next()
+		sink.asFlux().next()
 		                 .flatMapMany(flux -> flux
 				                 .takeWhile(s -> !"CHARLIE".equals(s))
 				                 .log(String.format("stream.window.%d", windowIndex.getAndIncrement())))
@@ -94,8 +96,7 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 		                 .expectNextCount(2)
 		                 .verifyComplete();
 
-		System.out.println("TWO");
-		incomingProcessor.next()
+		sink.asFlux().next()
 		                 .flatMapMany(flux -> flux
 				                 .takeWhile(s -> !"CHARLIE".equals(s))
 				                 .log(String.format("stream.window.%d", windowIndex.getAndIncrement())))
@@ -207,15 +208,15 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 		AssertSubscriber<Integer> ts1 = AssertSubscriber.create();
 		AssertSubscriber<Integer> ts2 = AssertSubscriber.create();
 
-		UnicastProcessor<Integer> up = UnicastProcessor.create(Queues.<Integer>get(8).get());
-		up.onNext(1);
-		up.onNext(2);
-		up.onNext(3);
-		up.onNext(4);
-		up.onNext(5);
-		up.onComplete();
+		Sinks.Many<Integer> up = Sinks.unsafe().many().unicast().onBackpressureBuffer(Queues.<Integer>get(8).get());
+		up.emitNext(1, FAIL_FAST);
+		up.emitNext(2, FAIL_FAST);
+		up.emitNext(3, FAIL_FAST);
+		up.emitNext(4, FAIL_FAST);
+		up.emitNext(5, FAIL_FAST);
+		up.emitComplete(FAIL_FAST);
 
-		ConnectableFlux<Integer> p = up.publish();
+		ConnectableFlux<Integer> p = up.asFlux().publish();
 
 		p.subscribe(ts1);
 		p.subscribe(ts2);
@@ -246,15 +247,15 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 		AssertSubscriber<Integer> ts1 = AssertSubscriber.create(0);
 		AssertSubscriber<Integer> ts2 = AssertSubscriber.create(0);
 
-		UnicastProcessor<Integer> up = UnicastProcessor.create(Queues.<Integer>get(8).get());
-		up.onNext(1);
-		up.onNext(2);
-		up.onNext(3);
-		up.onNext(4);
-		up.onNext(5);
-		up.onComplete();
+		Sinks.Many<Integer> up = Sinks.unsafe().many().unicast().onBackpressureBuffer(Queues.<Integer>get(8).get());
+		up.emitNext(1, FAIL_FAST);
+		up.emitNext(2, FAIL_FAST);
+		up.emitNext(3, FAIL_FAST);
+		up.emitNext(4, FAIL_FAST);
+		up.emitNext(5, FAIL_FAST);
+		up.emitComplete(FAIL_FAST);
 
-		ConnectableFlux<Integer> p = up.publish();
+		ConnectableFlux<Integer> p = up.asFlux().publish();
 
 		p.subscribe(ts1);
 		p.subscribe(ts2);
@@ -397,7 +398,7 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 		    .publishOn(Schedulers.single())
 		    .map(v -> Thread.currentThread().getName().contains("single-") ? "single" : ("BAD-" + v + Thread.currentThread().getName()))
 		    .share()
-		    .publishOn(Schedulers.elastic())
+		    .publishOn(Schedulers.boundedElastic())
 		    .distinct()
 		    .as(StepVerifier::create)
 		    .expectFusion()
@@ -410,16 +411,16 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 	public void disconnect() {
 		AssertSubscriber<Integer> ts = AssertSubscriber.create();
 
-		EmitterProcessor<Integer> e = EmitterProcessor.create();
+		Sinks.Many<Integer> e = Sinks.many().multicast().onBackpressureBuffer();
 
-		ConnectableFlux<Integer> p = e.publish();
+		ConnectableFlux<Integer> p = e.asFlux().publish();
 
 		p.subscribe(ts);
 
 		Disposable r = p.connect();
 
-		e.onNext(1);
-		e.onNext(2);
+		e.emitNext(1, FAIL_FAST);
+		e.emitNext(2, FAIL_FAST);
 
 		r.dispose();
 
@@ -427,16 +428,16 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 		.assertError(CancellationException.class)
 		.assertNotComplete();
 
-		Assert.assertFalse("sp has subscribers?", e.downstreamCount() != 0);
+		assertThat(e.currentSubscriberCount()).as("still connected").isZero();
 	}
 
 	@Test
 	public void disconnectBackpressured() {
 		AssertSubscriber<Integer> ts = AssertSubscriber.create(0);
 
-		EmitterProcessor<Integer> e = EmitterProcessor.create();
+		Sinks.Many<Integer> e = Sinks.many().multicast().onBackpressureBuffer();
 
-		ConnectableFlux<Integer> p = e.publish();
+		ConnectableFlux<Integer> p = e.asFlux().publish();
 
 		p.subscribe(ts);
 
@@ -448,29 +449,29 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 		.assertError(CancellationException.class)
 		.assertNotComplete();
 
-		Assert.assertFalse("sp has subscribers?", e.downstreamCount() != 0);
+		assertThat(e.currentSubscriberCount()).as("still connected").isZero();
 	}
 
 	@Test
 	public void error() {
 		AssertSubscriber<Integer> ts = AssertSubscriber.create();
 
-		EmitterProcessor<Integer> e = EmitterProcessor.create();
+		Sinks.Many<Integer> e = Sinks.many().multicast().onBackpressureBuffer();
 
-		ConnectableFlux<Integer> p = e.publish();
+		ConnectableFlux<Integer> p = e.asFlux().publish();
 
 		p.subscribe(ts);
 
 		p.connect();
 
-		e.onNext(1);
-		e.onNext(2);
-		e.onError(new RuntimeException("forced failure"));
+		e.emitNext(1, FAIL_FAST);
+		e.emitNext(2, FAIL_FAST);
+		e.emitError(new RuntimeException("forced failure"), FAIL_FAST);
 
 		ts.assertValues(1, 2)
-		.assertError(RuntimeException.class)
-		  .assertErrorWith( x -> Assert.assertTrue(x.getMessage().contains("forced failure")))
-		.assertNotComplete();
+				.assertError(RuntimeException.class)
+				.assertErrorWith(x -> assertThat(x).hasMessageContaining("forced failure"))
+				.assertNotComplete();
 	}
 
 	@Test
@@ -491,9 +492,10 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 
 	@Test
 	public void retry() {
-		DirectProcessor<Integer> dp = DirectProcessor.create();
+		Sinks.Many<Integer> dp = Sinks.unsafe().many().multicast().directBestEffort();
 		StepVerifier.create(
-				dp.publish()
+				dp.asFlux()
+				  .publish()
 				  .autoConnect().<Integer>handle((s1, sink) -> {
 					if (s1 == 1) {
 						sink.error(new RuntimeException());
@@ -503,23 +505,24 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 					}
 				}).retry())
 		            .then(() -> {
-			            dp.onNext(1);
-			            dp.onNext(2);
-			            dp.onNext(3);
+			            dp.emitNext(1, FAIL_FAST);
+			            dp.emitNext(2, FAIL_FAST);
+			            dp.emitNext(3, FAIL_FAST);
 		            })
 		            .expectNext(2, 3)
 		            .thenCancel()
 		            .verify();
 
 		// Need to explicitly complete processor due to use of publish()
-		dp.onComplete();
+		dp.emitComplete(FAIL_FAST);
 	}
 
 	@Test
 	public void retryWithPublishOn() {
-		DirectProcessor<Integer> dp = DirectProcessor.create();
+		Sinks.Many<Integer> dp = Sinks.unsafe().many().multicast().directBestEffort();
 		StepVerifier.create(
-				dp.publishOn(Schedulers.parallel()).publish()
+				dp.asFlux()
+				  .publishOn(Schedulers.parallel()).publish()
 				  .autoConnect().<Integer>handle((s1, sink) -> {
 					if (s1 == 1) {
 						sink.error(new RuntimeException());
@@ -529,16 +532,16 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 					}
 				}).retry())
 		            .then(() -> {
-			            dp.onNext(1);
-			            dp.onNext(2);
-			            dp.onNext(3);
+			            dp.emitNext(1, FAIL_FAST);
+			            dp.emitNext(2, FAIL_FAST);
+			            dp.emitNext(3, FAIL_FAST);
 		            })
 		            .expectNext(2, 3)
 		            .thenCancel()
 		            .verify();
 
 		// Need to explicitly complete processor due to use of publish()
-		dp.onComplete();
+		dp.emitComplete(FAIL_FAST);
 	}
 
 	@Test
@@ -548,6 +551,7 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(123);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
     }
 
 	@Test
@@ -559,6 +563,7 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(789);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
         test.queue.add(5);
         assertThat(test.scan(Scannable.Attr.BUFFERED)).isEqualTo(1);
 
@@ -588,6 +593,7 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         test.request(35);
         assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         parent.terminate();
@@ -607,6 +613,7 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
         FluxPublish.PubSubInner<Integer> test = new FluxPublish.PublishInner<>(parent);
 
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(parent);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
         test.request(35);
         assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35);
 
@@ -642,7 +649,8 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 	}
 
 	//see https://github.com/reactor/reactor-core/issues/1528
-	@Test(timeout = 4000)
+	@Test
+	@Timeout(4)
 	public void syncFusionFromInfiniteStream() {
 		final ConnectableFlux<Integer> publish =
 				Flux.fromStream(Stream.iterate(0, i -> i + 1))
@@ -657,7 +665,8 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 	}
 
 	//see https://github.com/reactor/reactor-core/issues/1528
-	@Test(timeout = 4000)
+	@Test
+	@Timeout(4)
 	public void syncFusionFromInfiniteStreamAndTake() {
 		final Flux<Integer> publish =
 				Flux.fromStream(Stream.iterate(0, i -> i + 1))
@@ -728,22 +737,22 @@ public class FluxPublishTest extends FluxOperatorTest<String, String> {
 		String key = "key";
 		int expectedValue = 1;
 
-		AtomicReference<Context> reference = new AtomicReference<>();
+		AtomicReference<ContextView> reference = new AtomicReference<>();
 
 		Flux<Integer> integerFlux =
 				Flux.just(1, 2, 3)
 				    .flatMap(value ->
-						    Mono.subscriberContext()
+						    Mono.deferContextual(Mono::just)
 						        .doOnNext(reference::set)
 						        .thenReturn(value)
 				    )
 				    .publish()
 				    .autoConnect(2);
 
-		integerFlux.subscriberContext(Context.of(key, expectedValue))
+		integerFlux.contextWrite(Context.of(key, expectedValue))
 		           .subscribe();
 
-		integerFlux.subscriberContext(Context.of(key, 2))
+		integerFlux.contextWrite(Context.of(key, 2))
 		           .subscribe();
 
 		assertThat((int) reference.get().get(key)).isEqualTo(expectedValue);

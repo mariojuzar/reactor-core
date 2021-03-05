@@ -18,83 +18,89 @@ package reactor.core.publisher;
 
 import java.time.Duration;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
+
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxSampleTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new FluxSample<>(null, Flux.never());
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxSample<>(null, Flux.never());
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void otherNull() {
-		Flux.never().sample((Publisher<Object>)null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never().sample((Publisher<Object>) null);
+		});
 	}
 
 	void sample(boolean complete, boolean which) {
-		DirectProcessor<Integer> main = DirectProcessor.create();
+		Sinks.Many<Integer> main = Sinks.unsafe().many().multicast().directBestEffort();
 
-		DirectProcessor<String> other = DirectProcessor.create();
+		Sinks.Many<String> other = Sinks.unsafe().many().multicast().directBestEffort();
 
 		AssertSubscriber<Integer> ts = AssertSubscriber.create();
 
-		main.sample(other).subscribe(ts);
+		main.asFlux().sample(other.asFlux()).subscribe(ts);
 
 		ts.assertNoValues()
 		  .assertNotComplete()
 		  .assertNoError();
 
-		main.onNext(1);
+		main.emitNext(1, FAIL_FAST);
 
 		ts.assertNoValues()
 		  .assertNotComplete()
 		  .assertNoError();
 
-		other.onNext("first");
+		other.emitNext("first", FAIL_FAST);
 
 		ts.assertValues(1)
 		  .assertNoError()
 		  .assertNotComplete();
 
-		other.onNext("second");
+		other.emitNext("second", FAIL_FAST);
 
 		ts.assertValues(1)
 		  .assertNoError()
 		  .assertNotComplete();
 
-		main.onNext(2);
+		main.emitNext(2, FAIL_FAST);
 
 		ts.assertValues(1)
 		  .assertNoError()
 		  .assertNotComplete();
 
-		other.onNext("third");
+		other.emitNext("third", FAIL_FAST);
 
 		ts.assertValues(1, 2)
 		  .assertNoError()
 		  .assertNotComplete();
 
-		DirectProcessor<?> p = which ? main : other;
+		Sinks.Many<?> p = which ? main : other;
 
 		if (complete) {
-			p.onComplete();
+			p.emitComplete(FAIL_FAST);
 
 			ts.assertValues(1, 2)
 			  .assertComplete()
 			  .assertNoError();
 		}
 		else {
-			p.onError(new RuntimeException("forced failure"));
+			p.emitError(new RuntimeException("forced failure"), FAIL_FAST);
 
 			ts.assertValues(1, 2)
 			  .assertNotComplete()
@@ -102,8 +108,8 @@ public class FluxSampleTest {
 			  .assertErrorMessage("forced failure");
 		}
 
-		Assert.assertFalse("Main has subscribers?", main.hasDownstreams());
-		Assert.assertFalse("Other has subscribers?", other.hasDownstreams());
+		assertThat(main.currentSubscriberCount()).as("main has subscriber").isZero();
+		assertThat(other.currentSubscriberCount()).as("other has subscriber").isZero();
 	}
 
 	@Test
@@ -128,21 +134,21 @@ public class FluxSampleTest {
 
 	@Test
 	public void subscriberCancels() {
-		DirectProcessor<Integer> main = DirectProcessor.create();
+		Sinks.Many<Integer> main = Sinks.unsafe().many().multicast().directBestEffort();
 
-		DirectProcessor<String> other = DirectProcessor.create();
+		Sinks.Many<String> other = Sinks.unsafe().many().multicast().directBestEffort();
 
 		AssertSubscriber<Integer> ts = AssertSubscriber.create();
 
-		main.sample(other).subscribe(ts);
+		main.asFlux().sample(other.asFlux()).subscribe(ts);
 
-		Assert.assertTrue("Main no subscriber?", main.hasDownstreams());
-		Assert.assertTrue("Other no subscriber?", other.hasDownstreams());
+		assertThat(main.currentSubscriberCount()).as("main has subscriber").isPositive();
+		assertThat(other.currentSubscriberCount()).as("other has subscriber").isPositive();
 
 		ts.cancel();
 
-		Assert.assertFalse("Main no subscriber?", main.hasDownstreams());
-		Assert.assertFalse("Other no subscriber?", other.hasDownstreams());
+		assertThat(main.currentSubscriberCount()).as("main has subscriber").isZero();
+		assertThat(other.currentSubscriberCount()).as("other has subscriber").isZero();
 
 		ts.assertNoValues()
 		  .assertNoError()
@@ -150,23 +156,23 @@ public class FluxSampleTest {
 	}
 
 	public void completeImmediately(boolean which) {
-		DirectProcessor<Integer> main = DirectProcessor.create();
+		Sinks.Many<Integer> main = Sinks.unsafe().many().multicast().directBestEffort();
 
-		DirectProcessor<String> other = DirectProcessor.create();
+		Sinks.Many<String> other = Sinks.unsafe().many().multicast().directBestEffort();
 
 		if (which) {
-			main.onComplete();
+			main.emitComplete(FAIL_FAST);
 		}
 		else {
-			other.onComplete();
+			other.emitComplete(FAIL_FAST);
 		}
 
 		AssertSubscriber<Integer> ts = AssertSubscriber.create();
 
-		main.sample(other).subscribe(ts);
+		main.asFlux().sample(other.asFlux()).subscribe(ts);
 
-		Assert.assertFalse("Main subscriber?", main.hasDownstreams());
-		Assert.assertFalse("Other subscriber?", other.hasDownstreams());
+		assertThat(main.currentSubscriberCount()).as("main has subscriber").isZero();
+		assertThat(other.currentSubscriberCount()).as("other has subscriber").isZero();
 
 		ts.assertNoValues()
 		  .assertNoError()
@@ -232,6 +238,7 @@ public class FluxSampleTest {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
         test.requested = 35;
         assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35L);
         test.value = 5;
@@ -250,6 +257,7 @@ public class FluxSampleTest {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(main.other);
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(main);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
         assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(Integer.MAX_VALUE);
 
         assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();

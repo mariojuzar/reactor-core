@@ -21,7 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import reactor.core.CoreSubscriber;
 import reactor.core.Disposable;
 import reactor.core.Scannable;
 import reactor.core.scheduler.Schedulers;
@@ -263,17 +264,17 @@ public class FluxRefCountGraceTest {
 
 		Disposable sub2 = refCounted.subscribe();
 		//second subscribe does reaches the count
-		assertThat(subscriptionCount.get()).isEqualTo(1);
+		assertThat(subscriptionCount).hasValue(1);
 		assertThat(termination.get()).isNull();
 
 		sub1.dispose();
 		//all subscribers are not disposed so source isn't terminated
-		assertThat(subscriptionCount.get()).isEqualTo(1);
+		assertThat(subscriptionCount).hasValue(1);
 		assertThat(termination.get()).isNull();
 
 		sub2.dispose();
 		//all subscribers are now disposed, but grace period kicks in
-		assertThat(subscriptionCount.get()).isEqualTo(1);
+		assertThat(subscriptionCount).hasValue(1);
 		assertThat(termination.get()).isNull();
 
 		//we re-subscribe quickly before grace period elapses
@@ -284,11 +285,11 @@ public class FluxRefCountGraceTest {
 		Thread.sleep(500);
 
 		//we expect the subscription to be still active
-		assertThat(subscriptionCount.get()).isEqualTo(1);
+		assertThat(subscriptionCount).hasValue(1);
 		assertThat(termination.get()).isNull();
 
 		publisher.complete();
-		assertThat(termination.get()).isEqualTo(SignalType.ON_COMPLETE);
+		assertThat(termination).hasValue(SignalType.ON_COMPLETE);
 	}
 
 	@Test
@@ -312,32 +313,32 @@ public class FluxRefCountGraceTest {
 
 		Disposable sub2 = refCounted.subscribe();
 		//second subscribe does reaches the count
-		assertThat(subscriptionCount.get()).isEqualTo(1);
+		assertThat(subscriptionCount).hasValue(1);
 		assertThat(termination.get()).isNull();
 
 		sub1.dispose();
 		//all subscribers are not disposed so source isn't terminated
-		assertThat(subscriptionCount.get()).isEqualTo(1);
+		assertThat(subscriptionCount).hasValue(1);
 		assertThat(termination.get()).isNull();
 
 		sub2.dispose();
 		//all subscribers are now disposed, but grace period kicks in
-		assertThat(subscriptionCount.get()).isEqualTo(1);
+		assertThat(subscriptionCount).hasValue(1);
 		assertThat(termination.get()).isNull();
 
 		//we wait for grace period to elapse
 		Thread.sleep(600);
-		assertThat(termination.get()).isEqualTo(SignalType.CANCEL);
+		assertThat(termination).hasValue(SignalType.CANCEL);
 		termination.set(null);
 
 		//we then resubscribe
 		sub1 = refCounted.subscribe();
 		sub2 = refCounted.subscribe();
-		assertThat(subscriptionCount.get()).isEqualTo(2);
+		assertThat(subscriptionCount).hasValue(2);
 
 		//since the TestPublisher doesn't cleanup on termination, we can re-evaluate the doFinally
 		publisher.complete();
-		assertThat(termination.get()).isEqualTo(SignalType.ON_COMPLETE);
+		assertThat(termination).hasValue(SignalType.ON_COMPLETE);
 	}
 
 	@Test
@@ -363,12 +364,24 @@ public class FluxRefCountGraceTest {
 	}
 
 	@Test
-	public void scanMain() {
+	public void scanOperator() {
 		ConnectableFlux<Integer> parent = Flux.just(10).publish();
 		FluxRefCountGrace<Integer> test = new FluxRefCountGrace<Integer>(parent, 17, Duration.ofSeconds(1), Schedulers.single());
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(256);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
+	public void scanInner(){
+		CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, sub -> sub.request(100));
+		FluxRefCountGrace<Integer> parent = new FluxRefCountGrace<>(Flux.just(10).publish(), 17, Duration.ofSeconds(1), Schedulers.single());
+
+		FluxRefCountGrace.RefCountInner<Integer> test = new FluxRefCountGrace.RefCountInner<>(actual, parent, new FluxRefCountGrace.RefConnection(parent));
+
+		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 }

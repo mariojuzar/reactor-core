@@ -21,8 +21,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.reactivestreams.Subscription;
+import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
+import reactor.core.Scannable;
+import reactor.test.MockUtils;
 import reactor.test.StepVerifier;
 import reactor.test.publisher.FluxOperatorTest;
 import reactor.util.function.Tuple2;
@@ -77,7 +82,7 @@ public class FluxIndexTest extends FluxOperatorTest<Integer, Tuple2<Long, Intege
 		            .expectComplete()
 		            .verify();
 
-		assertThat(counter.get()).isEqualTo(1000);
+		assertThat(counter).hasValue(1000);
 	}
 
 	@Test
@@ -102,7 +107,7 @@ public class FluxIndexTest extends FluxOperatorTest<Integer, Tuple2<Long, Intege
 				            it -> counter.incrementAndGet())
 		            .verifyComplete();
 
-		assertThat(counter.get()).isEqualTo(1000);
+		assertThat(counter).hasValue(1000);
 	}
 
 	@Test
@@ -122,7 +127,7 @@ public class FluxIndexTest extends FluxOperatorTest<Integer, Tuple2<Long, Intege
 		            .expectComplete()
 		            .verify();
 
-		assertThat(counter.get()).isEqualTo(1000);
+		assertThat(counter).hasValue(1000);
 	}
 
 	@Test
@@ -141,7 +146,7 @@ public class FluxIndexTest extends FluxOperatorTest<Integer, Tuple2<Long, Intege
 		            .expectComplete()
 		            .verify();
 
-		assertThat(counter.get()).isEqualTo(1000);
+		assertThat(counter).hasValue(1000);
 	}
 
 	@Test
@@ -166,7 +171,7 @@ public class FluxIndexTest extends FluxOperatorTest<Integer, Tuple2<Long, Intege
 				            it -> counter.incrementAndGet())
 		            .verifyComplete();
 
-		assertThat(counter.get()).isEqualTo(1000);
+		assertThat(counter).hasValue(1000);
 	}
 
 	@Test
@@ -186,7 +191,7 @@ public class FluxIndexTest extends FluxOperatorTest<Integer, Tuple2<Long, Intege
 		            .expectComplete()
 		            .verify();
 
-		assertThat(counter.get()).isEqualTo(1000);
+		assertThat(counter).hasValue(1000);
 	}
 
 	@Test
@@ -252,4 +257,49 @@ public class FluxIndexTest extends FluxOperatorTest<Integer, Tuple2<Long, Intege
 			throw new RuntimeException("should not be called");
 		}
 	}
+
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxIndex<Integer, Tuple2<Long, Integer>> test = new FluxIndex<>(parent, Tuples::of);
+
+	    assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
+	public void scanSubscriber(){
+		CoreSubscriber<Object> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
+		FluxIndex.IndexSubscriber<Object, Tuple2<Long, Object>> test =
+				new FluxIndex.IndexSubscriber<>(actual, Tuples::of);
+		Subscription parent = Operators.emptySubscription();
+		test.onSubscribe(parent);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+	    assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
+		test.onError(new IllegalStateException("boom"));
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).isTrue();
+	}
+
+	@Test
+	public void scanConditionnalSubscriber(){
+		@SuppressWarnings("unchecked")
+		Fuseable.ConditionalSubscriber<Tuple2<Long, String>> actual = Mockito.mock(MockUtils.TestScannableConditionalSubscriber.class);
+		FluxIndex.IndexConditionalSubscriber<String, Tuple2<Long, String>> test =
+				new FluxIndex.IndexConditionalSubscriber<>(actual, Tuples::of);
+		Subscription parent = Operators.emptySubscription();
+		test.onSubscribe(parent);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
+		test.onError(new IllegalStateException("boom"));
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).isTrue();
+	}
+
 }

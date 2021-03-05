@@ -58,6 +58,12 @@ final class MonoSingle<T> extends MonoFromFluxOperator<T, T>
 		return new SingleSubscriber<>(actual, defaultValue, completeOnEmpty);
 	}
 
+	@Override
+	public Object scanUnsafe(Attr key) {
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
+	}
+
 	static final class SingleSubscriber<T> extends Operators.MonoSubscriber<T, T>  {
 
 		@Nullable
@@ -75,6 +81,7 @@ final class MonoSingle<T> extends MonoFromFluxOperator<T, T>
 		public Object scanUnsafe(Attr key) {
 			if (key == Attr.TERMINATED) return done;
 			if (key == Attr.PARENT) return s;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 			return super.scanUnsafe(key);
 		}
@@ -102,11 +109,6 @@ final class MonoSingle<T> extends MonoFromFluxOperator<T, T>
 		}
 
 		@Override
-		public void setValue(T value) {
-			this.value = value;
-		}
-
-		@Override
 		public void onSubscribe(Subscription s) {
 			if (Operators.validate(this.s, s)) {
 				this.s = s;
@@ -117,16 +119,23 @@ final class MonoSingle<T> extends MonoFromFluxOperator<T, T>
 
 		@Override
 		public void onNext(T t) {
+			if (isCancelled()) {
+				//this helps differentiating a duplicate malformed signal "done" from a count > 1 "done"
+				discard(t);
+				return;
+			}
 			if (done) {
 				Operators.onNextDropped(t, actual.currentContext());
 				return;
 			}
-			value = t;
-
 			if (++count > 1) {
+				discard(t);
+				//mark as both cancelled and done
 				cancel();
-
 				onError(new IndexOutOfBoundsException("Source emitted more than one item"));
+			}
+			else {
+				setValue(t);
 			}
 		}
 
@@ -137,6 +146,11 @@ final class MonoSingle<T> extends MonoFromFluxOperator<T, T>
 				return;
 			}
 			done = true;
+			T v = this.value;
+			if (v != null) {
+				discard(v);
+				this.value = null;
+			}
 
 			actual.onError(t);
 		}
@@ -168,7 +182,7 @@ final class MonoSingle<T> extends MonoFromFluxOperator<T, T>
 				}
 			}
 			else if (c == 1) {
-				complete(value);
+				complete(this.value);
 			}
 		}
 

@@ -17,7 +17,7 @@ package reactor.core.scheduler;
 
 import java.util.concurrent.Executor;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.Scannable;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -44,6 +44,11 @@ public class ExecutorSchedulerTrampolineTest extends AbstractSchedulerTest {
 
 	@Override
 	protected boolean shouldCheckWorkerTimeScheduling() {
+		return false;
+	}
+
+	@Override
+	protected boolean shouldCheckSupportRestart() {
 		return false;
 	}
 

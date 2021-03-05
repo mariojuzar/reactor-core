@@ -16,9 +16,8 @@
 
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.Scannable;
-import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -44,6 +43,7 @@ public class ParallelLogTest {
 		assertThat(test.scan(Scannable.Attr.PREFETCH))
 				.isEqualTo(256)
 				.isEqualTo(source.getPrefetch());
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test

@@ -15,20 +15,28 @@
  */
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import reactor.core.Scannable;
 import reactor.test.subscriber.AssertSubscriber;
+
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class MonoSwitchIfEmptyTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new MonoSwitchIfEmpty<>(null, Mono.never());
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new MonoSwitchIfEmpty<>(null, Mono.never());
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void otherNull() {
-		Mono.never()
-		    .switchIfEmpty(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Mono.never()
+					.switchIfEmpty(null);
+		});
 	}
 
 	@Test
@@ -93,6 +101,13 @@ public class MonoSwitchIfEmptyTest {
 		ts.assertValues(10)
 		  .assertComplete()
 		  .assertNoError();
+	}
+
+	@Test
+	public void scanOperator(){
+	    MonoSwitchIfEmpty<Integer> test = new MonoSwitchIfEmpty<>(Mono.just(1), Mono.empty());
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 }

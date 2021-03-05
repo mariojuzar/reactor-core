@@ -15,7 +15,7 @@
  */
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
@@ -35,6 +35,13 @@ public class FluxErrorTest {
 	public void normalOnRequest() {
 		StepVerifier.create(Flux.error(new Exception("test"), true))
 		            .verifyErrorMessage("test");
+	}
+
+	@Test
+	public void scanOperator(){
+		FluxError test = new FluxError<>(new IllegalStateException("boom"));
+
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
     @Test

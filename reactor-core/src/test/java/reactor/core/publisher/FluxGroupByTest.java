@@ -22,9 +22,9 @@ import java.util.List;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.junit.Assert;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
@@ -37,6 +37,7 @@ import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.concurrent.Queues;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 public class FluxGroupByTest extends
                              FluxOperatorTest<String, GroupedFlux<Integer, String>> {
@@ -374,6 +375,37 @@ public class FluxGroupByTest extends
 	}
 
 	@Test
+	public void twoGroupsLongAsyncMergeHidden2() {
+		ForkJoinPool forkJoinPool = new ForkJoinPool();
+
+		for (int j = 0; j < 100; j++) {
+			AssertSubscriber<Long> ts = AssertSubscriber.create();
+			AtomicLong dropped = new AtomicLong();
+
+			Hooks.onNextDropped(__ -> dropped.incrementAndGet());
+			try {
+				final int total = 100_000;
+				Flux.range(0, total)
+				    .groupBy(i -> (i / 2d) * 2d, 42)
+				    .flatMap(it -> it.take(1)
+				                     .hide(), 2)
+				    .publishOn(Schedulers.fromExecutorService(forkJoinPool), 2)
+				    .count()
+				    .subscribe(ts);
+
+				ts.await(Duration.ofSeconds(50));
+
+				ts.assertValues(total - dropped.get())
+				  .assertNoError()
+				  .assertComplete();
+
+			} finally {
+				Hooks.resetOnNextDropped();
+			}
+		}
+	}
+
+	@Test
 	public void twoGroupsConsumeWithSubscribe() {
 		ForkJoinPool forkJoinPool = new ForkJoinPool();
 		AssertSubscriber<Integer> ts1 = AssertSubscriber.create();
@@ -473,15 +505,15 @@ public class FluxGroupByTest extends
 
 		if (!ts1.await(Duration.ofSeconds(5))
 		        .isTerminated()) {
-			Assert.fail("main subscriber timed out");
+			fail("main subscriber timed out");
 		}
 		if (!ts2.await(Duration.ofSeconds(5))
 		        .isTerminated()) {
-			Assert.fail("group 0 subscriber timed out");
+			fail("group 0 subscriber timed out");
 		}
 		if (!ts3.await(Duration.ofSeconds(5))
 		        .isTerminated()) {
-			Assert.fail("group 1 subscriber timed out");
+			fail("group 1 subscriber timed out");
 		}
 
 		ts1.assertValueCount(500_000)
@@ -541,15 +573,15 @@ public class FluxGroupByTest extends
 
 		if (!ts1.await(Duration.ofSeconds(5))
 		        .isTerminated()) {
-			Assert.fail("main subscriber timed out");
+			fail("main subscriber timed out");
 		}
 		if (!ts2.await(Duration.ofSeconds(5))
 		        .isTerminated()) {
-			Assert.fail("group 0 subscriber timed out");
+			fail("group 0 subscriber timed out");
 		}
 		if (!ts3.await(Duration.ofSeconds(5))
 		        .isTerminated()) {
-			Assert.fail("group 1 subscriber timed out");
+			fail("group 1 subscriber timed out");
 		}
 
 		ts1.assertValueCount(500_000)
@@ -626,7 +658,7 @@ public class FluxGroupByTest extends
 	}
 
 	@Test
-	@Ignore("temporarily disabled, see gh-1028")
+	@Disabled("temporarily disabled, see gh-1028")
 	public void twoGroupsFullAsyncFullHide() {
 		ForkJoinPool forkJoinPool = new ForkJoinPool();
 
@@ -689,7 +721,7 @@ public class FluxGroupByTest extends
 	}
 
 	@Test
-	@Ignore("temporarily disabled, see gh-1028")
+	@Disabled("temporarily disabled, see gh-1028")
 	public void twoGroupsFullAsync() {
 		ForkJoinPool forkJoinPool = new ForkJoinPool();
 		AssertSubscriber<Integer> ts1 = AssertSubscriber.create();
@@ -825,7 +857,7 @@ public class FluxGroupByTest extends
 		            .expectNextCount(10)
 		            .verifyComplete();
 
-		assertThat(initialRequest.get()).isEqualTo(11);
+		assertThat(initialRequest).hasValue(11);
 	}
 
 	@Test
@@ -839,7 +871,17 @@ public class FluxGroupByTest extends
 		            .expectNextCount(10)
 		            .verifyComplete();
 
-		assertThat(initialRequest.get()).isEqualTo(Long.MAX_VALUE);
+		assertThat(initialRequest).hasValue(Long.MAX_VALUE);
+	}
+
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxGroupBy<Integer, Integer, Integer> test
+				= new FluxGroupBy<>(parent, k -> k % 2, v -> -v, Queues.unbounded(3), Queues.unbounded(3), 3);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -855,6 +897,7 @@ public class FluxGroupByTest extends
 		assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(Long.MAX_VALUE);
 		assertThat(test.scan(Scannable.Attr.PREFETCH)).isSameAs(123);
 		assertThat(test.scan(Scannable.Attr.BUFFERED)).isSameAs(0);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 		assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		assertThat(test.scan(Scannable.Attr.ERROR)).isNull();
@@ -876,6 +919,7 @@ public class FluxGroupByTest extends
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(main);
 		assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(Long.MAX_VALUE);
 		assertThat(test.scan(Scannable.Attr.BUFFERED)).isSameAs(0);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 		assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		assertThat(test.scan(Scannable.Attr.ERROR)).isNull();
@@ -883,7 +927,8 @@ public class FluxGroupByTest extends
 		assertThat(test.scan(Scannable.Attr.ERROR)).isSameAs(test.error);
 	}
 
-	@Test(timeout = 10000)
+	@Test
+	@Timeout(10)
 	public void fusedGroupByParallel() {
 		int parallelism = 2;
 		Scheduler process = Schedulers.newParallel("process", parallelism, true);

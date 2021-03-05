@@ -40,11 +40,17 @@ final class MonoCollectList<T> extends MonoFromFluxOperator<T, List<T>> implemen
 		return new MonoCollectListSubscriber<>(actual);
 	}
 
+	@Override
+	public Object scanUnsafe(Attr key) {
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
+	}
+
 	static final class MonoCollectListSubscriber<T> extends Operators.MonoSubscriber<T, List<T>> {
 
-		Subscription s;
-
 		List<T> list;
+
+		Subscription s;
 
 		boolean done;
 
@@ -59,6 +65,7 @@ final class MonoCollectList<T> extends MonoFromFluxOperator<T, List<T>> implemen
 		public Object scanUnsafe(Attr key) {
 			if (key == Attr.PARENT) return s;
 			if (key == Attr.TERMINATED) return done;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 			return super.scanUnsafe(key);
 		}
 
@@ -92,7 +99,7 @@ final class MonoCollectList<T> extends MonoFromFluxOperator<T, List<T>> implemen
 
 		@Override
 		public void onError(Throwable t) {
-			if(done) {
+			if (done) {
 				Operators.onErrorDropped(t, actual.currentContext());
 				return;
 			}
@@ -102,7 +109,7 @@ final class MonoCollectList<T> extends MonoFromFluxOperator<T, List<T>> implemen
 				l = list;
 				list = null;
 			}
-			Operators.onDiscardMultiple(l, actual.currentContext());
+			discard(l);
 			actual.onError(t);
 		}
 
@@ -133,9 +140,12 @@ final class MonoCollectList<T> extends MonoFromFluxOperator<T, List<T>> implemen
 			List<T> l;
 			synchronized (this) {
 				state = STATE.getAndSet(this, CANCELLED);
+				if (state != CANCELLED) {
+					s.cancel();
+				}
 				if (state <= HAS_REQUEST_NO_VALUE) {
 					l = list;
-					value = null;
+					this.value = null;
 					list = null;
 				}
 				else {
@@ -143,7 +153,6 @@ final class MonoCollectList<T> extends MonoFromFluxOperator<T, List<T>> implemen
 				}
 			}
 			if (l != null) {
-				s.cancel();
 				discard(l);
 			}
 		}

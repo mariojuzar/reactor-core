@@ -38,6 +38,8 @@ It has a transitive dependency on `org.reactivestreams:reactive-streams:1.0.3`.
 * Reactor 3 does not officially support or target Android (consider using RxJava 2 if
 such support is a strong requirement).
 * However, it should work fine with Android SDK 26 (Android O) and above.
+* It will likely work fine with Android SDK 21 (Android 5.0) and above when desugaring 
+is enabled. See https://developer.android.com/studio/write/java8-support#library-desugaring
 * We are open to evaluating changes that benefit Android support in a best-effort
 fashion. However, we cannot make guarantees. Each decision must be made on a
 case-by-case basis.
@@ -96,20 +98,25 @@ However, if you want to force the use of a specific artifact's version, you can 
 it when adding your dependency, as you usually would. You can also forgo the BOM entirely
 and specify dependencies by their artifact versions.
 
+WARNING: As of this version (reactor-core {project-version}), the latest stable BOM in the associated
+release train line is `{reactorReleaseTrain}`, which is what is used in snippets below.
+There might be newer versions since then (including snapshots, milestones and new release train lines),
+see https://projectreactor.io/docs for the latest artifacts and BOMs.
+
 === Maven Installation
 
 Maven natively supports the BOM concept. First, you need to import the BOM by
 adding the following snippet to your `pom.xml`:
 
 ====
-[source,xml]
+[source,xml,subs=attributes+]
 ----
 <dependencyManagement> <1>
     <dependencies>
         <dependency>
             <groupId>io.projectreactor</groupId>
             <artifactId>reactor-bom</artifactId>
-            <version>Bismuth-RELEASE</version>
+            <version>{reactorReleaseTrain}</version>
             <type>pom</type>
             <scope>import</scope>
         </dependency>
@@ -168,11 +175,11 @@ Check for updates.
 Then use it to import the BOM, as follows:
 
 ====
-[source,groovy]
+[source,groovy,subs=attributes+]
 ----
 dependencyManagement {
      imports {
-          mavenBom "io.projectreactor:reactor-bom:Bismuth-RELEASE"
+          mavenBom "io.projectreactor:reactor-bom:{reactorReleaseTrain}"
      }
 }
 ----
@@ -194,10 +201,10 @@ the BOM.
 Since Gradle 5.0, you can use the native Gradle support for BOMs:
 
 ====
-[source,groovy]
+[source,groovy,subs=attributes+]
 ----
 dependencies {
-     implementation platform('io.projectreactor:reactor-bom:Bismuth-RELEASE')
+     implementation platform('io.projectreactor:reactor-bom:{reactorReleaseTrain}')
      implementation 'io.projectreactor:reactor-core' <1>
 }
 ----
@@ -265,3 +272,10 @@ repositories {
 }
 ----
 ====
+
+[[support]]
+== Support and policies
+
+The entries below are mirroring https://github.com/reactor/.github/blob/master/SUPPORT.adoc
+
+include::https://raw.githubusercontent.com/reactor/.github/master/SUPPORT.adoc[leveloffset=3]

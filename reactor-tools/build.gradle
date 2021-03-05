@@ -20,6 +20,7 @@ plugins {
 
 apply plugin: 'com.github.johnrengelman.shadow'
 apply plugin: 'org.unbroken-dome.test-sets'
+apply plugin: 'java-library'
 
 description = 'Reactor Tools'
 
@@ -34,23 +35,27 @@ configurations {
 }
 
 dependencies {
-    compile project(':reactor-core')
+    api project(":reactor-core")
+
+    compileOnly "com.google.code.findbugs:jsr305:${findbugsVersion}"
+    compileOnly "com.google.code.findbugs:annotations:${findbugsVersion}"
 
     shaded 'net.bytebuddy:byte-buddy-agent:1.10.9'
     shaded 'net.bytebuddy:byte-buddy:1.10.9'
     for (dependency in project.configurations.shaded.dependencies) {
         compileOnly(dependency)
-        testRuntime(dependency)
-        javaAgentTestRuntime(dependency)
+        testRuntimeOnly(dependency)
+        javaAgentTestRuntimeOnly(dependency)
     }
 
-    testImplementation "org.junit.jupiter:junit-jupiter-api:${jUnitJupiterVersion}"
-    testRuntime "org.junit.jupiter:junit-jupiter-engine:${jUnitJupiterVersion}"
+    testImplementation platform("org.junit:junit-bom:${jUnitPlatformVersion}")
+    testImplementation "org.junit.jupiter:junit-jupiter-api"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine"
 
-    testCompile "org.assertj:assertj-core:$assertJVersion"
-    testCompile 'cglib:cglib:3.3.0'
+    testImplementation "org.assertj:assertj-core:$assertJVersion"
+    testImplementation 'cglib:cglib:3.3.0'
 
-    jarFileTestCompile 'org.assertj:assertj-core:3.12.2' //FIXME bump in root and use property
+    jarFileTestImplementation 'org.assertj:assertj-core:3.12.2' //FIXME bump in root and use property
 }
 
 test {
@@ -64,13 +69,6 @@ test {
                     : "-XX:TraceRedefineClasses=2"
     ]
 
-    testLogging {
-        displayGranularity 1
-        showStackTraces = true
-        showStandardStreams = true
-        exceptionFormat = 'full'
-        events "STARTED", "PASSED", "FAILED", "SKIPPED"
-    }
 }
 
 jar {
@@ -104,7 +102,7 @@ shadowJar {
                     .toSet()
 
             // Exclude every compile-scoped dependency (including the transitive ones)
-            for (id in project.configurations.compile.resolvedConfiguration.resolvedArtifacts*.moduleVersion*.id) {
+            for (id in project.configurations.compileClasspath.resolvedConfiguration.resolvedArtifacts*.moduleVersion*.id) {
                 def module = "${id.group}:${id.name}".toString()
                 if (!shadedDependencies.contains(module)) {
                     project.configurations.shaded.exclude(group: id.group, module: id.name)
@@ -186,5 +184,14 @@ tasks.withType(Test).all {
     useJUnitPlatform()
 }
 
-//add jar and original jar to the publication
-publishing.publications.mavenJava.artifact(shadowJar)
+// make the shadow jar the default artifact
+['apiElements', 'runtimeElements'].each {
+    configurations.getByName(it).outgoing {
+        artifacts.clear()
+        artifact(shadowJar)
+    }
+}
+configurations.runtime.outgoing.artifacts.clear()
+
+//add original jar to the publication
+publishing.publications.mavenJava.artifact(jar)

@@ -17,22 +17,29 @@
 package reactor.core.publisher;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.subscriber.AssertSubscriber;
 
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 public class FluxTakeLastTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new FluxTakeLast<>(null, 1);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxTakeLast<>(null, 1);
+		});
 	}
 
-	@Test(expected = IllegalArgumentException.class)
+	@Test
 	public void negativeNumber() {
-		Flux.never().takeLast(-1);
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Flux.never().takeLast(-1);
+		});
 	}
 
 	@Test
@@ -167,6 +174,15 @@ public class FluxTakeLastTest {
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1, 2, 3, 4, 5);
+		FluxTakeLast<Integer> test = new FluxTakeLast<>(parent, 3);
+
+	    Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+	    Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanTakeLastManySubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxTakeLast.TakeLastManySubscriber<Integer> test = new FluxTakeLast.TakeLastManySubscriber<>(actual, 5);
@@ -175,6 +191,8 @@ public class FluxTakeLastTest {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+
         test.requested = 35;
         Assertions.assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35L);
         test.offer(1);
@@ -194,5 +212,6 @@ public class FluxTakeLastTest {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
     }
 }

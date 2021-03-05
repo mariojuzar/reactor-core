@@ -16,7 +16,7 @@
 
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
@@ -24,6 +24,13 @@ import reactor.core.Scannable;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class MonoPeekTerminalTest {
+
+	@Test
+	public void scanOperator(){
+		MonoPeekTerminal<String> test = new MonoPeekTerminal<>(Mono.just("foo"), null, null, null);
+
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
 
 	@Test
 	public void scanSubscriber() {
@@ -36,6 +43,7 @@ public class MonoPeekTerminalTest {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(sub);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.onError(new IllegalStateException("boom"));

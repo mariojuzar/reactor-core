@@ -24,7 +24,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Exceptions;
@@ -37,6 +37,7 @@ import reactor.test.publisher.TestPublisher;
 import reactor.util.concurrent.Queues;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assumptions.assumeThat;
 
 public class FluxOnBackpressureBufferTest
@@ -73,9 +74,11 @@ public class FluxOnBackpressureBufferTest
 		            .verify(Duration.ofSeconds(5));
 	}
 
-	@Test(expected = IllegalArgumentException.class)
-	public void failNegativeHistory(){
-		Flux.never().onBackpressureBuffer(-1);
+	@Test
+	public void failNegativeHistory() {
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Flux.never().onBackpressureBuffer(-1);
+		});
 	}
 
 	@Override
@@ -260,6 +263,16 @@ public class FluxOnBackpressureBufferTest
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxOnBackpressureBuffer<Integer> test = new FluxOnBackpressureBuffer<>(parent, 123, false, v -> {});
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(Integer.MAX_VALUE);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxOnBackpressureBuffer.BackpressureBufferSubscriber<Integer> test =
@@ -275,6 +288,7 @@ public class FluxOnBackpressureBufferTest
         assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35);
         assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(Integer.MAX_VALUE);
         assertThat(test.scan(Scannable.Attr.BUFFERED)).isEqualTo(0); // RS: TODO non-zero size
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         assertThat(test.scan(Scannable.Attr.ERROR)).isNull();
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();

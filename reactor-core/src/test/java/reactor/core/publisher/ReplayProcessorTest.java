@@ -17,22 +17,53 @@ package reactor.core.publisher;
 
 import java.time.Duration;
 
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.assertj.core.api.Assertions;
 import org.reactivestreams.Subscription;
+
+import reactor.core.CoreSubscriber;
 import reactor.core.Disposable;
-import reactor.core.Exceptions;
 import reactor.core.Fuseable;
 import reactor.core.Scannable;
+import reactor.test.util.LoggerUtils;
 import reactor.test.StepVerifier;
 import reactor.test.scheduler.VirtualTimeScheduler;
 import reactor.test.subscriber.AssertSubscriber;
+import reactor.test.util.TestLogger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
+// This is ok as this class tests the deprecated ReplayProcessor. Will be removed with it in 3.5.
+@SuppressWarnings("deprecation")
 public class ReplayProcessorTest {
+
+	@BeforeEach
+	public void virtualTime() {
+		VirtualTimeScheduler.getOrSet();
+	}
+
+	@AfterEach
+	public void teardownVirtualTime() {
+		VirtualTimeScheduler.reset();
+	}
+
+	@Test
+	public void currentSubscriberCount() {
+		Sinks.Many<Integer> sink = ReplayProcessor.create();
+
+		assertThat(sink.currentSubscriberCount()).isZero();
+
+		sink.asFlux().subscribe();
+
+		assertThat(sink.currentSubscriberCount()).isOne();
+
+		sink.asFlux().subscribe();
+
+		assertThat(sink.currentSubscriberCount()).isEqualTo(2);
+	}
 
     @Test
     public void unbounded() {
@@ -47,7 +78,7 @@ public class ReplayProcessorTest {
         rp.onNext(3);
         rp.onComplete();
 
-        Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+        assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
 
         ts.assertNoValues();
         
@@ -75,7 +106,7 @@ public class ReplayProcessorTest {
         rp.onNext(3);
         rp.onComplete();
 
-        Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+        assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
 
         ts.assertNoValues();
         
@@ -99,8 +130,8 @@ public class ReplayProcessorTest {
 	    rp.subscribe(ts);
         
         ts.cancel();
-        
-        Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+
+	    assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
     }
 
     @Test
@@ -116,7 +147,7 @@ public class ReplayProcessorTest {
 
         rp.subscribe(ts);
 
-        Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+	    assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
 
         ts.assertNoValues();
         
@@ -144,7 +175,7 @@ public class ReplayProcessorTest {
 
         rp.subscribe(ts);
 
-        Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+	    assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
 
         ts.assertNoValues();
         
@@ -172,7 +203,7 @@ public class ReplayProcessorTest {
 
         rp.subscribe(ts);
 
-        Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+	    assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
 
         ts.assertNoValues();
         
@@ -442,7 +473,7 @@ public class ReplayProcessorTest {
 		            .expectNext(15,16,17,18,19)
 		            .verifyComplete();
 
-		Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+		assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
     }
 
 	@Test
@@ -467,7 +498,7 @@ public class ReplayProcessorTest {
 		            .expectNext(15,16,17,18,19)
 		            .verifyErrorMessage("test");
 
-		Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+		assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
     }
 
 	@Test
@@ -492,7 +523,7 @@ public class ReplayProcessorTest {
 		            .expectNextCount(20)
 		            .verifyComplete();
 
-		Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+		assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
     }
 
 	@Test
@@ -517,7 +548,7 @@ public class ReplayProcessorTest {
 		            .expectNext(15,16,17,18,19)
 		            .verifyComplete();
 
-		Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+		assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
 	}
 
 	@Test
@@ -542,72 +573,81 @@ public class ReplayProcessorTest {
 		            .expectNext(15,16,17,18,19)
 		            .verifyErrorMessage("test");
 
-		Assert.assertFalse("Has subscribers?", rp.hasDownstreams());
+		assertThat(rp.currentSubscriberCount()).as("has subscriber").isZero();
 	}
 
 	@Test
-	public void timedAndBoundedOnSubscribeAndState(){
+	public void timedAndBoundedOnSubscribeAndState() {
 		testReplayProcessorState(ReplayProcessor.createSizeAndTimeout(1, Duration.ofSeconds(1)));
 	}
 
 	@Test
-	public void timedOnSubscribeAndState(){
+	public void timedOnSubscribeAndState() {
 		testReplayProcessorState(ReplayProcessor.createTimeout(Duration.ofSeconds(1)));
 	}
 
 	@Test
-	public void unboundedOnSubscribeAndState(){
+	public void unboundedOnSubscribeAndState() {
 		testReplayProcessorState(ReplayProcessor.create(1, true));
 	}
 
 	@Test
-	public void boundedOnSubscribeAndState(){
+	public void boundedOnSubscribeAndState() {
     	testReplayProcessorState(ReplayProcessor.cacheLast());
 	}
 
 	@SuppressWarnings("unchecked")
-	void testReplayProcessorState(ReplayProcessor<String> rp){
-		Disposable d1 = rp.subscribe();
+	void testReplayProcessorState(ReplayProcessor<String> rp) {
+		TestLogger testLogger = new TestLogger();
+		LoggerUtils.enableCaptureWith(testLogger);
+		try {
+			Disposable d1 = rp.subscribe();
 
-		rp.subscribe();
+			rp.subscribe();
 
-		ReplayProcessor.ReplayInner<String> s =
-				((ReplayProcessor.ReplayInner<String>) rp.inners().findFirst().get());
+			ReplayProcessor.ReplayInner<String> s = ((ReplayProcessor.ReplayInner<String>) rp.inners()
+			                                                                                 .findFirst()
+			                                                                                 .get());
 
-		assertThat(d1).isEqualTo(s.actual());
+			assertThat(d1).isEqualTo(s.actual());
 
-		assertThat(s.isEmpty()).isTrue();
-		assertThat(s.isCancelled()).isFalse();
-		assertThat(s.isCancelled()).isFalse();
+			assertThat(s.isEmpty()).isTrue();
+			assertThat(s.isCancelled()).isFalse();
+			assertThat(s.isCancelled()).isFalse();
 
-		assertThat(rp.getPrefetch()).isEqualTo(Integer.MAX_VALUE);
-		if(rp.getBufferSize() != Integer.MAX_VALUE) {
-			assertThat(rp.getBufferSize()).isEqualTo(1);
-		}
-		FluxSink<String> sink = rp.sink();
-		sink.next("test");
-		rp.onComplete();
+			assertThat(rp.getPrefetch()).isEqualTo(Integer.MAX_VALUE);
+			if (rp.getBufferSize() != Integer.MAX_VALUE) {
+				assertThat(rp.getBufferSize()).isEqualTo(1);
+			}
+			FluxSink<String> sink = rp.sink();
+			sink.next("test");
+			rp.onComplete();
 
-		rp.onComplete();
+			rp.onComplete();
 
-		Exception e = new RuntimeException("test");
-		try{
+			Exception e = new RuntimeException("test");
 			rp.onError(e);
-			Assert.fail();
+			Assertions.assertThat(testLogger.getErrContent())
+			          .contains("Operator called default onErrorDropped")
+			          .contains(e.getMessage());
 		}
-		catch (Exception t){
-			assertThat(Exceptions.unwrap(t)).isEqualTo(e);
+		finally {
+			LoggerUtils.disableCapture();
 		}
 	}
 
-	@Test(expected = IllegalArgumentException.class)
+	@Test
 	public void failNegativeBufferSizeBounded() {
-		ReplayProcessor.create(-1);
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			ReplayProcessor.create(-1);
+		});
 	}
 
-	@Test(expected = IllegalArgumentException.class)
+	@Test
 	public void failNegativeBufferBoundedAndTimed() {
-		ReplayProcessor.createSizeAndTimeout(-1, Duration.ofSeconds(1));
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			ReplayProcessor.createSizeAndTimeout(-1, Duration.ofSeconds(1));
+		});
 	}
 
 	@Test
@@ -633,13 +673,22 @@ public class ReplayProcessorTest {
 		assertThat(test.scan(Scannable.Attr.CAPACITY)).isEqualTo(Integer.MAX_VALUE);
 	}
 
-	@Before
-	public void virtualTime(){
-    	VirtualTimeScheduler.getOrSet();
-	}
+	@Test
+	public void inners() {
+		Sinks.Many<Integer> sink = ReplayProcessor.create(1);
+		CoreSubscriber<Integer> notScannable = new BaseSubscriber<Integer>() {};
+		InnerConsumer<Integer> scannable = new LambdaSubscriber<>(null, null, null, null);
 
-	@After
-	public void teardownVirtualTime(){
-		VirtualTimeScheduler.reset();
+		assertThat(sink.inners()).as("before subscriptions").isEmpty();
+
+		sink.asFlux().subscribe(notScannable);
+		sink.asFlux().subscribe(scannable);
+
+		assertThat(sink.inners())
+				.asList()
+				.as("after subscriptions")
+				.hasSize(2)
+				.extracting(l -> (Object) ((ReplayProcessor.ReplayInner<?>) l).actual)
+				.containsExactly(notScannable, scannable);
 	}
 }

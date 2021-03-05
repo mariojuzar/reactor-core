@@ -47,6 +47,12 @@ final class MonoReduce<T> extends MonoFromFluxOperator<T, T>
 		return new ReduceSubscriber<>(actual, aggregator);
 	}
 
+	@Override
+	public Object scanUnsafe(Attr key) {
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
+	}
+
 	static final class ReduceSubscriber<T> extends Operators.MonoSubscriber<T, T> {
 
 		final BiFunction<T, T, T> aggregator;
@@ -66,6 +72,7 @@ final class MonoReduce<T> extends MonoFromFluxOperator<T, T>
 		public Object scanUnsafe(Attr key) {
 			if (key == Attr.TERMINATED) return done;
 			if (key == Attr.PARENT) return s;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 			return super.scanUnsafe(key);
 		}
@@ -85,9 +92,9 @@ final class MonoReduce<T> extends MonoFromFluxOperator<T, T>
 				Operators.onNextDropped(t, actual.currentContext());
 				return;
 			}
-			T r = value;
+			T r = this.value;
 			if (r == null) {
-				value = t;
+				setValue(t);
 			}
 			else {
 				try {
@@ -98,14 +105,14 @@ final class MonoReduce<T> extends MonoFromFluxOperator<T, T>
 					done = true;
 					Context ctx = actual.currentContext();
 					Operators.onDiscard(t, ctx);
-					Operators.onDiscard(value, ctx);
-					value = null;
+					Operators.onDiscard(this.value, ctx);
+					this.value = null;
 					actual.onError(Operators.onOperatorError(s, ex, t,
 							actual.currentContext()));
 					return;
 				}
 
-				value = r;
+				setValue(r);
 			}
 		}
 
@@ -116,8 +123,8 @@ final class MonoReduce<T> extends MonoFromFluxOperator<T, T>
 				return;
 			}
 			done = true;
-			Operators.onDiscard(value, actual.currentContext());
-			value = null;
+			discard(this.value);
+			this.value = null;
 			actual.onError(t);
 		}
 
@@ -127,7 +134,7 @@ final class MonoReduce<T> extends MonoFromFluxOperator<T, T>
 				return;
 			}
 			done = true;
-			T r = value;
+			T r = this.value;
 			if (r != null) {
 				complete(r);
 			}

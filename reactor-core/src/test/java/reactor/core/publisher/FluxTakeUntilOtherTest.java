@@ -19,24 +19,31 @@ package reactor.core.publisher;
 import java.time.Duration;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 public class FluxTakeUntilOtherTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void nullSource() {
-		new FluxTakeUntilOther<>(null, Flux.never());
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxTakeUntilOther<>(null, Flux.never());
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void nullOther() {
-		Flux.never()
-		    .takeUntilOther(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never()
+					.takeUntilOther(null);
+		});
 	}
 
 	@Test
@@ -190,6 +197,15 @@ public class FluxTakeUntilOtherTest {
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxTakeUntilOther<Integer, Integer> test = new FluxTakeUntilOther<>(parent, Flux.just(2));
+
+		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanMainSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxTakeUntilOther.TakeUntilMainSubscriber<Integer> test =
@@ -200,6 +216,7 @@ public class FluxTakeUntilOtherTest {
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         @SuppressWarnings("unchecked")
 		SerializedSubscriber<Integer> serialized = (SerializedSubscriber<Integer>) test.scan(Scannable.Attr.ACTUAL);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
         Assertions.assertThat(serialized).isNotNull();
         Assertions.assertThat(serialized.actual()).isSameAs(actual);
 
@@ -220,6 +237,7 @@ public class FluxTakeUntilOtherTest {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(main);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         Assertions.assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
         main.cancel();

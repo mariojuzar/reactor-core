@@ -66,6 +66,12 @@ final class MonoPublishMulticast<T, R> extends InternalMonoOperator<T, R> implem
 		return multicast;
 	}
 
+	@Override
+	public Object scanUnsafe(Attr key) {
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
+	}
+
 	static final class MonoPublishMulticaster<T> extends Mono<T>
 			implements InnerConsumer<T>, FluxPublishMulticast.PublishMulticasterParent {
 
@@ -126,6 +132,9 @@ final class MonoPublishMulticast<T, R> extends InternalMonoOperator<T, R> implem
 			}
 			if (key == Attr.BUFFERED) {
 				return value != null ? 1 : 0;
+			}
+			if (key == Attr.RUN_STYLE) {
+			    return Attr.RunStyle.SYNC;
 			}
 
 			return null;
@@ -226,28 +235,29 @@ final class MonoPublishMulticast<T, R> extends InternalMonoOperator<T, R> implem
 							return;
 						}
 
-						if (v == null) {
-							@SuppressWarnings("unchecked")
-							PublishMulticastInner<T>[] castedArray = SUBSCRIBERS.getAndSet(this, TERMINATED);
-							a = castedArray;
-							n = a.length;
+						@SuppressWarnings("unchecked")
+						PublishMulticastInner<T>[] castedArray = SUBSCRIBERS.getAndSet(this, TERMINATED);
+						a = castedArray;
+						n = a.length;
+						Throwable ex = error;
+						if (ex != null) {
+							for (int i = 0; i < n; i++) {
+								a[i].actual.onError(ex);
+							}
+						}
+						else if (v == null) {
 							for (int i = 0; i < n; i++) {
 								a[i].actual.onComplete();
 							}
-							return;
 						}
 						else {
-							@SuppressWarnings("unchecked")
-							PublishMulticastInner<T>[] castedArray = SUBSCRIBERS.getAndSet(this, TERMINATED);
-							a = castedArray;
-							n = a.length;
 							for (int i = 0; i < n; i++) {
 								a[i].actual.onNext(v);
 								a[i].actual.onComplete();
 							}
 							value = null;
-							return;
 						}
+						return;
 					}
 				}
 
@@ -350,6 +360,9 @@ final class MonoPublishMulticast<T, R> extends InternalMonoOperator<T, R> implem
 			}
 			if (key == Attr.CANCELLED) {
 				return cancelled == 1;
+			}
+			if (key == Attr.RUN_STYLE) {
+			    return Attr.RunStyle.SYNC;
 			}
 
 			return InnerProducer.super.scanUnsafe(key);

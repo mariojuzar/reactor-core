@@ -18,13 +18,17 @@ package reactor.core.publisher;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
-import org.junit.Test;
+import org.assertj.core.api.SoftAssertions;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
+import reactor.core.Disposable;
 import reactor.core.Scannable;
 import reactor.core.publisher.MonoCollectList.MonoCollectListSubscriber;
 import reactor.test.StepVerifier;
@@ -150,6 +154,16 @@ public class MonoCollectListTest {
 	}
 
 	@Test
+	public void scanOperator(){
+	    Flux<Integer> source = Flux.just(1);
+		MonoCollectList<Integer> test = new MonoCollectList<>(source);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(source);
+		assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(Integer.MAX_VALUE);
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
 	public void scanBufferAllSubscriber() {
 		CoreSubscriber<List<String>> actual = new LambdaMonoSubscriber<>(null, e -> {}, null, null);
 		MonoCollectListSubscriber<String> test = new MonoCollectListSubscriber<>(actual);
@@ -160,7 +174,7 @@ public class MonoCollectListTest {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
-
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.onError(new IllegalStateException("boom"));
@@ -226,7 +240,7 @@ public class MonoCollectListTest {
 			if (!extraneous.get()) {
 				LOGGER.info(""+subscriber.list);
 			}
-			assertThat(extraneous).as("released " + i).isTrue();
+			assertThat(extraneous).as("released %d", i).isTrue();
 		}
 		LOGGER.info("discarded twice or more: {}", doubleDiscardCounter.get());
 	}
@@ -252,7 +266,7 @@ public class MonoCollectListTest {
 			RaceTestUtils.race(subscriber::cancel, subscriber::onComplete);
 
 			if (testSubscriber.values().isEmpty()) {
-				assertThat(resource).as("not completed and released " + i).isTrue();
+				assertThat(resource).as("not completed and released %d", i).isTrue();
 			}
 		}
 		LOGGER.info("discarded twice or more: {}", doubleDiscardCounter.get());
@@ -274,6 +288,29 @@ public class MonoCollectListTest {
 		List<Object> result = new EmptyFluxCallable().collectList().block();
 
 		assertThat(result).isEmpty();
+	}
+
+	@Test
+	// See https://github.com/reactor/reactor-core/issues/2519
+	void cancelPropagatesEvenOnEmptySource() {
+		AtomicBoolean cancel1 = new AtomicBoolean();
+		AtomicBoolean cancel2 = new AtomicBoolean();
+
+		Flux<?> publisher = Flux.never()
+				.hide()
+				.doOnCancel(() -> cancel1.set(true))
+				.collectList()
+				//.hide()
+				.doOnCancel(() -> cancel2.set(true))
+				.flatMapIterable(Function.identity())
+				;
+		Disposable d = publisher.subscribe();
+		d.dispose();
+
+		SoftAssertions.assertSoftly(softly -> {
+			softly.assertThat(cancel1).as("cancel1").isTrue();
+			softly.assertThat(cancel2).as("cancel2").isTrue();
+		});
 	}
 
 }

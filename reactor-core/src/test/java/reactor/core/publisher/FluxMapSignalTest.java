@@ -18,7 +18,7 @@ package reactor.core.publisher;
 import java.util.Arrays;
 import java.util.List;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
@@ -27,12 +27,15 @@ import reactor.test.publisher.FluxOperatorTest;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxMapSignalTest extends FluxOperatorTest<String, String> {
 
-	@Test(expected = IllegalArgumentException.class)
-	public void allNull(){
-		Flux.never().flatMap(null, null, null);
+	@Test
+	public void allNull() {
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Flux.never().flatMap(null, null, null);
+		});
 	}
 
 	@Override
@@ -131,6 +134,15 @@ public class FluxMapSignalTest extends FluxOperatorTest<String, String> {
 		            .verifyComplete();
 	}
 
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxMapSignal<Integer, Integer> test = new FluxMapSignal<>(parent, v -> v, e -> 1, () -> 10);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
     @Test
     public void scanSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
@@ -146,6 +158,7 @@ public class FluxMapSignalTest extends FluxOperatorTest<String, String> {
         test.requested = 35;
         assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35);
         assertThat(test.scan(Scannable.Attr.BUFFERED)).isEqualTo(0); // RS: TODO non-zero size
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.onError(new IllegalStateException("boom"));

@@ -24,28 +24,26 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Assert;
-import org.junit.Ignore;
-import org.junit.Test;
-
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
-import reactor.core.publisher.DirectProcessor;
-import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.MonoProcessor;
 import reactor.core.publisher.Operators;
-import reactor.core.publisher.UnicastProcessor;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.publisher.TestPublisher;
@@ -54,6 +52,8 @@ import reactor.util.context.Context;
 
 import static java.util.Collections.emptyList;
 import static org.assertj.core.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
 import static reactor.test.publisher.TestPublisher.Violation.REQUEST_OVERFLOW;
 
 /**
@@ -544,16 +544,16 @@ public class StepVerifierTests {
 				.log();
 
 		Duration took = StepVerifier.create(source,  1)
-		                            .then(() -> Schedulers.elastic().schedule(() -> publisher.next(0L)))
+		                            .then(() -> Schedulers.boundedElastic().schedule(() -> publisher.next(0L)))
 		                            .assertNext(next -> {
 			                            LockSupport.parkNanos(Duration.ofMillis(500)
 			                                                          .toNanos());
 			                            asserted.set(true);
 			                            assertThat(next).isEqualTo(0L);
 		                            })
-		                            .then(() -> Schedulers.elastic().schedule(() ->
+		                            .then(() -> Schedulers.boundedElastic().schedule(() ->
 				                            publisher.next(1L)))
-		                            .then(() -> Schedulers.elastic().schedule(() ->
+		                            .then(() -> Schedulers.boundedElastic().schedule(() ->
 				                            publisher.next(2L), 50, TimeUnit.MILLISECONDS))
 		                            .expectNoEvent(Duration.ofMillis(100))
 		                            .thenRequest(1)
@@ -590,13 +590,13 @@ public class StepVerifierTests {
 				.doOnCancel(() -> downStreamCancelled.set(true));
 
 		Duration took = StepVerifier.create(source)
-		                            .then(() -> Schedulers.elastic().schedule(() -> publisher.next(0L)))
+		                            .then(() -> Schedulers.boundedElastic().schedule(() -> publisher.next(0L)))
 		                            .assertNext(next -> {
 			                            asserted.set(true);
 			                            assertThat(next).isEqualTo(0L);
 		                            })
-		                            .then(() -> Schedulers.elastic().schedule(() ->
-				                            publisher.next(1L)))
+		                            .then(() -> Schedulers.boundedElastic().schedule(() ->
+				                            publisher.next(1L), 10, TimeUnit.MILLISECONDS))
 		                            .thenCancel()
 		                            .verify(Duration.ofSeconds(5));
 
@@ -625,15 +625,15 @@ public class StepVerifierTests {
 
 	@Test
 	public void verifyThenOnCompleteRange() {
-		DirectProcessor<Void> p = DirectProcessor.create();
+		Sinks.Empty<Void> p = Sinks.empty();
 
 		Flux<String> flux = Flux.range(0, 3)
 		                        .map(d -> "t" + d)
-		                        .takeUntilOther(p);
+		                        .takeUntilOther(p.asMono());
 
 		StepVerifier.create(flux, 2)
 		            .expectNext("t0", "t1")
-		            .then(p::onComplete)
+		            .then(p::tryEmitEmpty)
 		            .expectComplete()
 		            .verify();
 
@@ -653,7 +653,7 @@ public class StepVerifierTests {
 		                                .expectComplete()
 		                                .verify(Duration.ofMillis(500));
 
-		assertThat(duration.toMillis()).isGreaterThan(2 * interval);
+		assertThat(duration.toMillis()).isGreaterThanOrEqualTo(2 * interval);
 	}
 
 	@Test
@@ -835,7 +835,7 @@ public class StepVerifierTests {
 		Mono<String> flux = Mono.just("foo");
 
 		StepVerifier.create(flux)
-		            .consumeSubscriptionWith(s -> assertThat(s).isInstanceOf(Fuseable.QueueSubscription.class))
+		            .consumeSubscriptionWith(s -> assertThat(s).withFailMessage("Non-fuseable: %s", s.getClass()).isInstanceOf(Fuseable.QueueSubscription.class))
 		            .expectNext("foo")
 		            .expectComplete()
 		            .verify();
@@ -847,7 +847,7 @@ public class StepVerifierTests {
 
 		StepVerifier.create(flux)
 		            .expectNext("foo")
-		            .consumeSubscriptionWith(s -> assertThat(s).isInstanceOf(Fuseable.QueueSubscription.class))
+		            .consumeSubscriptionWith(s -> assertThat(s).withFailMessage("Non-fuseable: %s", s.getClass()).isInstanceOf(Fuseable.QueueSubscription.class))
 		            .expectComplete()
 		            .verify();
 	}
@@ -1168,7 +1168,8 @@ public class StepVerifierTests {
 	            .withMessage("scenarioSupplier");
 	}
 
-	@Test(timeout = 3000)
+	@Test
+	@Timeout(value = 3000, unit = TimeUnit.MILLISECONDS)
 	public void verifyVirtualTimeOnNextIntervalManual() {
 		VirtualTimeScheduler vts = VirtualTimeScheduler.create();
 
@@ -1210,7 +1211,8 @@ public class StepVerifierTests {
 		            .verify();
 	}
 
-	@Test(timeout = 1000)
+	@Test
+	@Timeout(value = 1000, unit = TimeUnit.MILLISECONDS)
 	public void verifyCreatedForAllSchedulerUsesVirtualTime() {
 		//a timeout will occur if virtual time isn't used
 		StepVerifier.withVirtualTime(() -> Flux.interval(Duration.ofSeconds(3))
@@ -1235,7 +1237,8 @@ public class StepVerifierTests {
 		assertThat(verifyDuration.toMillis()).isGreaterThanOrEqualTo(1000L);
 	}
 
-	@Test(timeout = 500)
+	@Test
+	@Timeout(value = 500, unit = TimeUnit.MILLISECONDS)
 	public void noSignalVirtualTime() {
 		StepVerifier.withVirtualTime(Mono::never, 1)
 		            .expectSubscription()
@@ -1894,7 +1897,8 @@ public class StepVerifierTests {
 		assertThat(totalRequest.longValue()).isEqualTo(12L);
 	}
 
-	@Test(timeout = 1000L)
+	@Test
+	@Timeout(value = 1000L, unit = TimeUnit.MILLISECONDS)
 	public void expectCancelDoNotHang() {
 		StepVerifier.create(Flux.just("foo", "bar"), 1)
 		            .expectNext("foo")
@@ -1902,7 +1906,8 @@ public class StepVerifierTests {
 		            .verify();
 	}
 
-	@Test(timeout = 1000L)
+	@Test
+	@Timeout(value = 1000L, unit = TimeUnit.MILLISECONDS)
 	public void consumeNextWithLowRequestShortcircuits() {
 		StepVerifier.Step<String> validSoFar = StepVerifier.create(Flux.just("foo", "bar"), 1)
 				                         .expectNext("foo");
@@ -1913,7 +1918,8 @@ public class StepVerifierTests {
 	            .withMessageEndingWith("request remaining since last step: 0, expected: 1");
 	}
 
-	@Test(timeout = 1000L)
+	@Test
+	@Timeout(value = 1000L, unit = TimeUnit.MILLISECONDS)
 	public void assertNextLowRequestShortcircuits() {
 		StepVerifier.Step<String> validSoFar = StepVerifier.create(Flux.just("foo", "bar"), 1)
 		                                                   .expectNext("foo");
@@ -1924,7 +1930,8 @@ public class StepVerifierTests {
 				.withMessageEndingWith("request remaining since last step: 0, expected: 1");
 	}
 
-	@Test(timeout = 1000L)
+	@Test
+	@Timeout(value = 1000L, unit = TimeUnit.MILLISECONDS)
 	public void expectNextLowRequestShortcircuits() {
 		StepVerifier.Step<String> validSoFar = StepVerifier.create(Flux.just("foo", "bar"), 1)
 		                                                   .expectNext("foo");
@@ -1935,7 +1942,8 @@ public class StepVerifierTests {
 				.withMessageEndingWith("request remaining since last step: 0, expected: 1");
 	}
 
-	@Test(timeout = 1000L)
+	@Test
+	@Timeout(value = 1000L, unit = TimeUnit.MILLISECONDS)
 	public void expectNextCountLowRequestShortcircuits() {
 		assertThatExceptionOfType(IllegalArgumentException.class)
 				.isThrownBy(() -> StepVerifier.create(Flux.just("foo", "bar"), 1)
@@ -1945,7 +1953,8 @@ public class StepVerifierTests {
 				.withMessageEndingWith("request remaining since last step: 1, expected: 2");
 	}
 
-	@Test(timeout = 1000L)
+	@Test
+	@Timeout(value = 1000L, unit = TimeUnit.MILLISECONDS)
 	public void expectNextMatchesLowRequestShortcircuits() {
 		StepVerifier.Step<String> validSoFar = StepVerifier.create(Flux.just("foo", "bar"), 1)
 		                                                   .expectNext("foo");
@@ -1956,7 +1965,8 @@ public class StepVerifierTests {
 				.withMessageEndingWith("request remaining since last step: 0, expected: 1");
 	}
 
-	@Test(timeout = 1000L)
+	@Test
+	@Timeout(value = 1000L, unit = TimeUnit.MILLISECONDS)
 	public void expectNextSequenceLowRequestShortcircuits() {
 		StepVerifier.Step<String> validSoFar = StepVerifier.create(Flux.just("foo", "bar"), 1);
 		List<String> expected = Arrays.asList("foo", "bar");
@@ -1967,7 +1977,8 @@ public class StepVerifierTests {
 				.withMessageEndingWith("request remaining since last step: 1, expected: 2");
 	}
 
-	@Test(timeout = 1000L)
+	@Test
+	@Timeout(value = 1000L, unit = TimeUnit.MILLISECONDS)
 	public void thenConsumeWhileLowRequestShortcircuits() {
 		StepVerifier.Step<Integer> validSoFar = StepVerifier.create(Flux.just(1, 2), 1)
 		                                                    .expectNext(1);
@@ -1978,7 +1989,8 @@ public class StepVerifierTests {
 	            .withMessageEndingWith("request remaining since last step: 0, expected: at least 1 (best effort estimation)");
 	}
 
-	@Test(timeout = 1000L)
+	@Test
+	@Timeout(value = 1000L, unit = TimeUnit.MILLISECONDS)
 	public void lowRequestCheckCanBeDisabled() {
 		StepVerifier.create(Flux.just(1, 2),
 				StepVerifierOptions.create().initialRequest(1).checkUnderRequesting(false))
@@ -1988,12 +2000,12 @@ public class StepVerifierTests {
 
 	@Test
 	public void takeAsyncFusedBackpressured() {
-		UnicastProcessor<String> up = UnicastProcessor.create();
-		StepVerifier.create(up.take(3), 0)
+		Sinks.Many<String> up = Sinks.many().unicast().onBackpressureBuffer();
+		StepVerifier.create(up.asFlux().take(3), 0)
 		            .expectFusion()
-		            .then(() -> up.onNext("test"))
-		            .then(() -> up.onNext("test"))
-		            .then(() -> up.onNext("test"))
+		            .then(() -> up.emitNext("test", FAIL_FAST))
+		            .then(() -> up.emitNext("test", FAIL_FAST))
+		            .then(() -> up.emitNext("test", FAIL_FAST))
 		            .thenRequest(2)
 		            .expectNext("test", "test")
 		            .thenRequest(1)
@@ -2003,12 +2015,12 @@ public class StepVerifierTests {
 
 	@Test
 	public void cancelAsyncFusion() {
-		UnicastProcessor<String> up = UnicastProcessor.create();
-		StepVerifier.create(up.take(3), 0)
+		Sinks.Many<String> up = Sinks.many().unicast().onBackpressureBuffer();
+		StepVerifier.create(up.asFlux().take(3), 0)
 		            .expectFusion()
-		            .then(() -> up.onNext("test"))
-		            .then(() -> up.onNext("test"))
-		            .then(() -> up.onNext("test"))
+		            .then(() -> up.emitNext("test", FAIL_FAST))
+		            .then(() -> up.emitNext("test", FAIL_FAST))
+		            .then(() -> up.emitNext("test", FAIL_FAST))
 		            .thenRequest(2)
 		            .expectNext("test", "test")
 		            .thenCancel()
@@ -2037,13 +2049,13 @@ public class StepVerifierTests {
 		                                       .take(100000)
 		                                       .collectList())
 		            .thenAwait(Duration.ofHours(1000))
-		            .consumeNextWith(list -> Assert.assertTrue(list.size() == 100000))
+		            .consumeNextWith(list -> assertTrue(list.size() == 100000))
 		            .verifyComplete();
 	}
 
 	@Test
 	public void withInitialContext() {
-		StepVerifier.create(Mono.subscriberContext(),
+		StepVerifier.create(Mono.deferContextual(Mono::just),
 				StepVerifierOptions.create().withInitialContext(Context.of("foo", "bar")))
 		            .assertNext(c -> Assertions.assertThat(c.getOrDefault("foo", "baz"))
 		                                       .isEqualTo("bar"))
@@ -2072,16 +2084,16 @@ public class StepVerifierTests {
 
 	//see https://github.com/reactor/reactor-core/issues/959
 	@Test
-	public void assertNextWithSubscribeOnDirectProcessor() {
+	public void assertNextWithSubscribeOnSink() {
 		Scheduler scheduler = Schedulers.newBoundedElastic(1, 100, "test");
-		DirectProcessor<Integer> processor = DirectProcessor.create();
+		Sinks.Many<Integer> sink = Sinks.unsafe().many().multicast().directBestEffort();
 		Mono<Integer> doAction = Mono.fromSupplier(() -> 22)
-		                             .doOnNext(processor::onNext)
+		                             .doOnNext(v -> sink.tryEmitNext(v).orThrow())
 		                             .subscribeOn(scheduler);
 
 		assertThatExceptionOfType(AssertionError.class)
 				.isThrownBy(
-						StepVerifier.create(processor)
+						StepVerifier.create(sink.asFlux())
 						            .then(doAction::subscribe)
 						            .assertNext(v -> assertThat(v).isEqualTo(23))
 						            .thenCancel()
@@ -2135,7 +2147,8 @@ public class StepVerifierTests {
 		}
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void gh783() {
 		int size = 1;
 		Scheduler parallel = Schedulers.newParallel("gh-783");
@@ -2154,7 +2167,8 @@ public class StepVerifierTests {
 		            .verifyComplete();
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void gh783_deferredAdvanceTime() {
 		int size = 61;
 		Scheduler parallel = Schedulers.newParallel("gh-783");
@@ -2175,7 +2189,7 @@ public class StepVerifierTests {
 	}
 
 	@Test
-	@Ignore
+	@Disabled
 	//FIXME this case of doubly-nested schedules is still not fully fixed
 	public void gh783_withInnerFlatmap() {
 		int size = 61;
@@ -2320,10 +2334,10 @@ public class StepVerifierTests {
 
 	@Test
 	public void verifyDrainOnRequestInCaseOfFusion() {
-		MonoProcessor<Integer> processor = MonoProcessor.create();
-		StepVerifier.create(processor, 0)
+		Sinks.One<Integer> processor = Sinks.one();
+		StepVerifier.create(processor.asMono(), 0)
 				.expectFusion(Fuseable.ANY)
-				.then(() -> processor.onNext(1))
+				.then(() -> processor.emitValue(1, FAIL_FAST))
 				.thenRequest(1)
 				.expectNext(1)
 				.verifyComplete();
@@ -2332,12 +2346,12 @@ public class StepVerifierTests {
 	@Test
 	public void verifyDrainOnRequestInCaseOfFusion2() {
 		ArrayList<Long> requests = new ArrayList<>();
-		UnicastProcessor<Integer> processor = UnicastProcessor.create();
-		StepVerifier.create(processor.doOnRequest(requests::add), 0)
+		Sinks.Many<Integer> processor = Sinks.many().unicast().onBackpressureBuffer();
+		StepVerifier.create(processor.asFlux().doOnRequest(requests::add), 0)
 				.expectFusion(Fuseable.ANY)
 				.then(() -> {
-					processor.onNext(1);
-					processor.onComplete();
+					processor.emitNext(1, FAIL_FAST);
+					processor.emitComplete(FAIL_FAST);
 				})
 				.thenRequest(1)
 				.thenRequest(1)
@@ -2356,17 +2370,17 @@ public class StepVerifierTests {
 
 
 		StepVerifier.withVirtualTime(() -> {
-			EmitterProcessor<String> fluxEmitter = EmitterProcessor.create();
+			Sinks.Many<String> fluxEmitter = Sinks.many().multicast().onBackpressureBuffer();
 
 			subscriptionWorker.schedulePeriodically(() -> {
 				if (source.size() > 0) {
-					fluxEmitter.onNext(source.remove(0));
+					fluxEmitter.emitNext(source.remove(0), FAIL_FAST);
 				}
 				else {
-					fluxEmitter.onComplete();
+					fluxEmitter.emitComplete(FAIL_FAST);
 				}
 			}, 0, 10, TimeUnit.MILLISECONDS);
-			return fluxEmitter;
+			return fluxEmitter.asFlux();
 		})
 		            .expectNext("first")
 		            .expectNoEvent(Duration.ofMillis(10))
@@ -2393,5 +2407,43 @@ public class StepVerifierTests {
 		            .isInstanceOf(IllegalStateException.class)
                     .hasMessage("ErrorInSubscribeFlux");
         });
+	}
+
+	@Test
+	public void withVirtualTimeResetsCustomFactoryAndOldSharedThreads() {
+		try {
+			AtomicInteger customFactoryInvoked = new AtomicInteger();
+			Schedulers.Factory customFactory = new Schedulers.Factory() {
+
+				@Override
+				public Scheduler newParallel(int parallelism, ThreadFactory threadFactory) {
+					customFactoryInvoked.incrementAndGet();
+					return Schedulers.Factory.super.newParallel(parallelism, threadFactory);
+				}
+			};
+			Schedulers.setFactory(customFactory);
+			Scheduler preParallel = Schedulers.parallel();
+
+			assertThat(customFactoryInvoked).as("custom factory pre verifier").hasValue(1);
+
+			StepVerifier.withVirtualTime(() -> Mono.delay(Duration.ofSeconds(1)))
+			            .thenAwait(Duration.ofSeconds(1))
+			            .expectNext(0L)
+			            .expectComplete()
+			            .verify(Duration.ofMillis(500));
+
+			assertThat(customFactoryInvoked).as("custom factory post verification").hasValue(1);
+
+			Scheduler postParallel = Schedulers.parallel();
+			Scheduler postNewParallel = Schedulers.newParallel("foo");
+			postNewParallel.dispose();
+
+			assertThat(postParallel).isSameAs(preParallel);
+			assertThat(postNewParallel).isNotInstanceOf(VirtualTimeScheduler.class);
+			assertThat(customFactoryInvoked).as("custom factory post newParallel").hasValue(2);
+		}
+		finally {
+			Schedulers.resetFactory();
+		}
 	}
 }

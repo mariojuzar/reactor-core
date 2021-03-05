@@ -22,7 +22,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.Exceptions;
 import reactor.core.Fuseable;
 import reactor.core.publisher.Operators.MonoSubscriber;
@@ -32,8 +32,6 @@ import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.function.Tuple2;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
 
 public class MonoSubscriberTest {
 
@@ -41,7 +39,7 @@ public class MonoSubscriberTest {
 	public void queueSubscriptionSyncRejected() {
 		MonoSubscriber<Integer, Integer> ds = new MonoSubscriber<>(new AssertSubscriber<>());
 
-		assertEquals(Fuseable.NONE, ds.requestFusion(Fuseable.SYNC));
+		assertThat(ds.requestFusion(Fuseable.SYNC)).isEqualTo(Fuseable.NONE);
 	}
 
 	@Test
@@ -52,8 +50,8 @@ public class MonoSubscriberTest {
 
 		ds.clear();
 
-		assertEquals(MonoSubscriber.FUSED_CONSUMED, ds.state);
-		assertNull(ds.value);
+		assertThat(ds.state).isEqualTo(MonoSubscriber.FUSED_CONSUMED);
+		assertThat(ds.value).isNull();
 	}
 
 	@Test
@@ -183,7 +181,7 @@ public class MonoSubscriberTest {
 			Map<String, Mono<Integer>> input = new HashMap<>();
 			input.put("one", Mono.just(1));
 			input.put("two", Mono.create(
-					(sink) -> Schedulers.elastic().schedule(() -> sink.success(2))));
+					(sink) -> Schedulers.boundedElastic().schedule(() -> sink.success(2))));
 			input.put("three", Mono.just(3));
 			int sum = Flux.fromIterable(input.entrySet())
 			              .flatMap((entry) -> Mono.zip(Mono.just(entry.getKey()), entry.getValue()))

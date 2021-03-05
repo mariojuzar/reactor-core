@@ -18,8 +18,7 @@ package reactor.core.publisher;
 
 import java.util.Arrays;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
@@ -35,10 +34,10 @@ public class MonoWhenTest {
 		Mono<Void> f = Mono.just(1)
 		                   .and(Mono.just("test2"));
 
-		Assert.assertTrue(f instanceof MonoWhen);
+		assertThat(f).isInstanceOf(MonoWhen.class);
 		MonoWhen s = (MonoWhen) f;
-		Assert.assertTrue(s.sources != null);
-		Assert.assertTrue(s.sources.length == 2);
+		assertThat(s.sources).isNotNull();
+		assertThat(s.sources).hasSize(2);
 
 		f.subscribeWith(AssertSubscriber.create())
 		 .assertComplete()
@@ -143,5 +142,6 @@ public class MonoWhenTest {
 	public void scanOperator() {
 		MonoWhen s = new MonoWhen(true);
 		assertThat(s.scan(Scannable.Attr.DELAY_ERROR)).as("delayError").isTrue();
+		assertThat(s.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 }

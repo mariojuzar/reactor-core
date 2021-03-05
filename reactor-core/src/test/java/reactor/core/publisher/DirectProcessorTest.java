@@ -15,48 +15,60 @@
  */
 package reactor.core.publisher;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import java.time.Duration;
+
 import org.reactivestreams.Subscriber;
-import reactor.core.Scannable;
+
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
+import reactor.util.context.Context;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
+// This is ok as this class tests the deprecated DirectProcessor. Will be removed with it in 3.5.
+@SuppressWarnings("deprecation")
 public class DirectProcessorTest {
 
-    @Test(expected = NullPointerException.class)
-    public void onNextNull() {
-	    DirectProcessor.create().onNext(null);
-    }
+	@Test
+	public void onNextNull() {
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			DirectProcessor.create().onNext(null);
+		});
+	}
 
-    @Test(expected = NullPointerException.class)
-    public void onErrorNull() {
-	    DirectProcessor.create().onError(null);
-    }
+	@Test
+	public void onErrorNull() {
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			DirectProcessor.create().onError(null);
+		});
+	}
 
-    @Test(expected = NullPointerException.class)
-    public void onSubscribeNull() {
-        DirectProcessor.create().onSubscribe(null);
-    }
+	@Test
+	public void onSubscribeNull() {
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			DirectProcessor.create().onSubscribe(null);
+		});
+	}
 
-    @Test(expected = NullPointerException.class)
-    public void subscribeNull() {
-	    DirectProcessor.create().subscribe((Subscriber<Object>)null);
-    }
+	@Test
+	public void subscribeNull() {
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			DirectProcessor.create().subscribe((Subscriber<Object>) null);
+		});
+	}
 
-    @Test
-    public void normal() {
-        DirectProcessor<Integer> tp = DirectProcessor.create();
+	@Test
+	public void normal() {
+		DirectProcessor<Integer> tp = DirectProcessor.create();
 
 	    StepVerifier.create(tp)
 	                .then(() -> {
-		                Assert.assertTrue("No subscribers?", tp.hasDownstreams());
-		                Assert.assertFalse("Completed?", tp.hasCompleted());
-		                Assert.assertNull("Has error?", tp.getError());
-		                Assert.assertFalse("Has error?", tp.hasError());
+		                assertThat(tp.hasDownstreams()).as("has downstreams").isTrue();
+		                assertThat(tp.hasCompleted()).as("hasCompleted").isFalse();
+		                assertThat(tp.getError()).as("getError").isNull();
+		                assertThat(tp.hasError()).as("hasError").isFalse();
 	                })
 	                .then(() -> {
 		                tp.onNext(1);
@@ -71,10 +83,10 @@ public class DirectProcessorTest {
 	                .expectComplete()
 	                .verify();
 
-	    Assert.assertFalse("Subscribers present?", tp.hasDownstreams());
-	    Assert.assertTrue("Not completed?", tp.hasCompleted());
-	    Assert.assertNull("Has error?", tp.getError());
-	    Assert.assertFalse("Has error?", tp.hasError());
+	    assertThat(tp.hasDownstreams()).as("has downstreams").isFalse();
+	    assertThat(tp.hasCompleted()).as("hasCompleted").isTrue();
+	    assertThat(tp.getError()).as("getError").isNull();
+	    assertThat(tp.hasError()).as("hasError").isFalse();
     }
 
     @Test
@@ -83,10 +95,10 @@ public class DirectProcessorTest {
 
 	    StepVerifier.create(tp, 0L)
 	                .then(() -> {
-		                Assert.assertTrue("No subscribers?", tp.hasDownstreams());
-		                Assert.assertFalse("Completed?", tp.hasCompleted());
-		                Assert.assertNull("Has error?", tp.getError());
-		                Assert.assertFalse("Has error?", tp.hasError());
+		                assertThat(tp.hasDownstreams()).as("has downstreams").isTrue();
+		                assertThat(tp.hasCompleted()).as("hasCompleted").isFalse();
+		                assertThat(tp.getError()).as("getError").isNull();
+		                assertThat(tp.hasError()).as("hasError").isFalse();
 	                })
 	                .thenRequest(10L)
 	                .then(() -> {
@@ -98,10 +110,10 @@ public class DirectProcessorTest {
 	                .expectComplete()
 	                .verify();
 
-	    Assert.assertFalse("Subscribers present?", tp.hasDownstreams());
-	    Assert.assertTrue("Not completed?", tp.hasCompleted());
-	    Assert.assertNull("Has error?", tp.getError());
-	    Assert.assertFalse("Has error?", tp.hasError());
+	    assertThat(tp.hasDownstreams()).as("has downstreams").isFalse();
+	    assertThat(tp.hasCompleted()).as("hasCompleted").isTrue();
+	    assertThat(tp.getError()).as("getError").isNull();
+	    assertThat(tp.hasError()).as("hasError").isFalse();
     }
 
     @Test
@@ -127,10 +139,10 @@ public class DirectProcessorTest {
 
         tp.subscribe(ts);
 
-        Assert.assertTrue("No subscribers?", tp.hasDownstreams());
-        Assert.assertFalse("Completed?", tp.hasCompleted());
-        Assert.assertNull("Has error?", tp.getError());
-        Assert.assertFalse("Has error?", tp.hasError());
+	    assertThat(tp.hasDownstreams()).as("has downstreams").isTrue();
+	    assertThat(tp.hasCompleted()).as("hasCompleted").isFalse();
+	    assertThat(tp.getError()).as("getError").isNull();
+	    assertThat(tp.hasError()).as("hasError").isFalse();
 
         ts.assertNoValues()
           .assertNoError()
@@ -146,14 +158,13 @@ public class DirectProcessorTest {
         tp.onNext(3);
         tp.onError(new RuntimeException("forced failure"));
 
-        Assert.assertFalse("Subscribers present?", tp.hasDownstreams());
-        Assert.assertFalse("Completed?", tp.hasCompleted());
-        Assert.assertNotNull("Has error?", tp.getError());
-        Assert.assertTrue("No error?", tp.hasError());
-
-        Throwable e = tp.getError();
-        Assert.assertTrue("Wrong exception? " + e, RuntimeException.class.isInstance(e));
-        Assert.assertEquals("forced failure", e.getMessage());
+	    assertThat(tp.hasDownstreams()).as("has downstreams").isFalse();
+	    assertThat(tp.hasCompleted()).as("hasCompleted").isFalse();
+	    assertThat(tp.hasError()).as("hasError").isTrue();
+	    assertThat(tp.getError()).as("getError")
+	                             .isNotNull()
+	                             .isExactlyInstanceOf(RuntimeException.class)
+	                             .hasMessage("forced failure");
 
         ts.assertValues(1, 2, 3)
           .assertNotComplete()
@@ -170,14 +181,13 @@ public class DirectProcessorTest {
 
         tp.subscribe(ts);
 
-        Assert.assertFalse("Subscribers present?", tp.hasDownstreams());
-        Assert.assertFalse("Completed?", tp.hasCompleted());
-        Assert.assertNotNull("No error?", tp.getError());
-        Assert.assertTrue("No error?", tp.hasError());
-
-        Throwable e = tp.getError();
-        Assert.assertTrue("Wrong exception? " + e, RuntimeException.class.isInstance(e));
-        Assert.assertEquals("forced failure", e.getMessage());
+	    assertThat(tp.hasDownstreams()).as("has downstreams").isFalse();
+	    assertThat(tp.hasCompleted()).as("hasCompleted").isFalse();
+	    assertThat(tp.hasError()).as("hasError").isTrue();
+	    assertThat(tp.getError()).as("getError")
+	                             .isNotNull()
+	                             .isExactlyInstanceOf(RuntimeException.class)
+	                             .hasMessage("forced failure");
 
         ts.assertNoValues()
           .assertNotComplete()
@@ -194,10 +204,10 @@ public class DirectProcessorTest {
 
         tp.subscribe(ts);
 
-        Assert.assertFalse("Subscribers present?", tp.hasDownstreams());
-        Assert.assertTrue("Not completed?", tp.hasCompleted());
-        Assert.assertNull("Has error?", tp.getError());
-        Assert.assertFalse("Has error?", tp.hasError());
+	    assertThat(tp.hasDownstreams()).as("has downstreams").isFalse();
+	    assertThat(tp.hasCompleted()).as("hasCompleted").isTrue();
+	    assertThat(tp.getError()).as("getError").isNull();
+	    assertThat(tp.hasError()).as("hasError").isFalse();
 
         ts.assertNoValues()
           .assertComplete()
@@ -213,7 +223,7 @@ public class DirectProcessorTest {
 
         tp.subscribe(ts);
 
-        Assert.assertFalse("Subscribers present?", tp.hasDownstreams());
+	    assertThat(tp.hasDownstreams()).as("has downstreams").isFalse();
 
         tp.onNext(1);
 
@@ -231,7 +241,7 @@ public class DirectProcessorTest {
 
         tp.subscribe(ts);
 
-        Assert.assertTrue("No Subscribers present?", tp.hasDownstreams());
+	    assertThat(tp.hasDownstreams()).as("has downstreams").isTrue();
 
         tp.onNext(1);
 
@@ -241,7 +251,7 @@ public class DirectProcessorTest {
 
         ts.cancel();
 
-        Assert.assertFalse("Subscribers present?", tp.hasDownstreams());
+	    assertThat(tp.hasDownstreams()).as("has downstreams").isFalse();
 
         tp.onNext(2);
 
@@ -251,20 +261,32 @@ public class DirectProcessorTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    public void scanInner() {
-	    InnerConsumer<? super String> actual = mock(InnerConsumer.class);
-        DirectProcessor<String> parent = new DirectProcessor<>();
+	public void currentContextDelegatesToFirstSubscriber() {
+	    AssertSubscriber<Object> testSubscriber1 = new AssertSubscriber<>(Context.of("key", "value1"));
+	    AssertSubscriber<Object> testSubscriber2 = new AssertSubscriber<>(Context.of("key", "value2"));
 
-        DirectProcessor.DirectInner<String> test =
-                new DirectProcessor.DirectInner<>(actual, parent);
+	    DirectProcessor<Object> directProcessor = new DirectProcessor<>();
+	    directProcessor.subscribe(testSubscriber1);
+	    directProcessor.subscribe(testSubscriber2);
 
-        assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
-        assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
-        assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
+	    Context processorContext = directProcessor.currentContext();
 
-        test.cancel();
-        assertThat(test.scan(Scannable.Attr.CANCELLED)).isTrue();
+	    assertThat(processorContext.getOrDefault("key", "EMPTY")).isEqualTo("value1");
     }
+
+	@Test
+	public void onNextWithNoSubscriberJustDiscardsWithoutTerminatingTheSink() {
+		DirectProcessor<Integer> directProcessor = DirectProcessor.create();
+		directProcessor.onNext(1);
+
+		StepVerifier.create(directProcessor)
+		            .expectSubscription()
+		            .expectNoEvent(Duration.ofSeconds(1))
+		            .then(() -> directProcessor.onNext(2))
+		            .then(directProcessor::onComplete)
+		            .expectNext(2)
+		            .expectComplete()
+		            .verify(Duration.ofSeconds(5));
+	}
 
 }

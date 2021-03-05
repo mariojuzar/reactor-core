@@ -18,7 +18,7 @@ package reactor.core.publisher;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 
@@ -27,14 +27,13 @@ import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertTrue;
 
 public class MonoSourceTest {
 
 	@Test
 	public void empty() {
 		Mono<Integer> m = Mono.from(Flux.empty());
-		assertTrue(m == Mono.<Integer>empty());
+		assertThat(m == Mono.<Integer>empty()).isTrue();
 		StepVerifier.create(m)
 		            .verifyComplete();
 	}
@@ -42,7 +41,7 @@ public class MonoSourceTest {
 	@Test
 	public void just() {
 		Mono<Integer> m = Mono.from(Flux.just(1));
-		assertTrue(m instanceof MonoJust);
+		assertThat(m).isInstanceOf(MonoJust.class);
 		StepVerifier.create(m)
 	                .expectNext(1)
 	                .verifyComplete();
@@ -51,7 +50,7 @@ public class MonoSourceTest {
 	@Test
 	public void error() {
 		Mono<Integer> m = Mono.from(Flux.error(new Exception("test")));
-		assertTrue(m instanceof MonoError);
+		assertThat(m).isInstanceOf(MonoError.class);
 		StepVerifier.create(m)
 		            .verifyErrorMessage("test");
 	}
@@ -59,7 +58,7 @@ public class MonoSourceTest {
 	@Test
 	public void errorPropagate() {
 		Mono<Integer> m = Mono.from(Flux.error(new Error("test")));
-		assertTrue(m instanceof MonoError);
+		assertThat(m).isInstanceOf(MonoError.class);
 		StepVerifier.create(m)
 		            .verifyErrorMessage("test");
 	}
@@ -257,27 +256,36 @@ public class MonoSourceTest {
 	@Test
 	public void onAssemblyDescription() {
 		String monoOnAssemblyStr = Mono.just(1).checkpoint("onAssemblyDescription").toString();
-		System.out.println(Mono.just(1).checkpoint("onAssemblyDescription"));
-		assertTrue("Description not included: " + monoOnAssemblyStr, monoOnAssemblyStr.contains("checkpoint(\"onAssemblyDescription\")"));
+		assertThat(monoOnAssemblyStr).as("Description not included").contains("checkpoint(\"onAssemblyDescription\")");
 	}
 
 	@Test
 	public void scanSubscriber() {
 		Flux<String> source = Flux.just("foo").map(i -> i);
-		Mono<String> test = Mono.fromDirect(source);
+		MonoSource<String> test = new MonoSource<>(source);
 
-		assertThat(Scannable.from(test).scan(Scannable.Attr.PARENT)).isSameAs(source);
-		assertThat(Scannable.from(test).scan(Scannable.Attr.ACTUAL)).isNull();
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(source);
+		assertThat(test.scan(Scannable.Attr.ACTUAL)).isNull();
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
+	@Test
+	public void scanFuseableSubscriber(){
+		Mono<String> source = Mono.just("foo");
+		MonoSourceFuseable<String> test = new MonoSourceFuseable<>(source);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(source);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
 
 	@Test
 	public void scanSubscriberHide() {
 		Flux<String> source = Flux.just("foo").hide();
-		Mono<String> test = Mono.fromDirect(source);
+		MonoSource<String> test = new MonoSource<>(source);
 
-		assertThat(Scannable.from(test).scan(Scannable.Attr.PARENT)).isSameAs(source);
-		assertThat(Scannable.from(test).scan(Scannable.Attr.ACTUAL)).isNull();
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(source);
+		assertThat(test.scan(Scannable.Attr.ACTUAL)).isNull();
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -287,6 +295,7 @@ public class MonoSourceTest {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(source);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isNull();
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test

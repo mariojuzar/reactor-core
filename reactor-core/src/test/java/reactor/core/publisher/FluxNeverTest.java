@@ -15,15 +15,17 @@
  */
 package reactor.core.publisher;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import reactor.core.Scannable;
 import reactor.test.subscriber.AssertSubscriber;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class FluxNeverTest {
 
 	@Test
 	public void singleInstance() {
-		Assert.assertSame(Flux.never(), Flux.never());
+		assertThat(Flux.never()).isSameAs(Flux.never());
 	}
 
 	@Test
@@ -37,5 +39,12 @@ public class FluxNeverTest {
 		  .assertNoValues()
 		  .assertNoError()
 		  .assertNotComplete();
+	}
+
+	@Test
+	public void scanOperator(){
+	    FluxNever test = new FluxNever();
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 }

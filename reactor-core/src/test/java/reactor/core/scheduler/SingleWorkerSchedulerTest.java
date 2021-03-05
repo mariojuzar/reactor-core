@@ -15,7 +15,7 @@
  */
 package reactor.core.scheduler;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.Scannable;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,6 +42,11 @@ public class SingleWorkerSchedulerTest extends AbstractSchedulerTest {
 
 	@Override
 	protected boolean shouldCheckWorkerTimeScheduling() {
+		return false;
+	}
+
+	@Override
+	protected boolean shouldCheckSupportRestart() {
 		return false;
 	}
 

@@ -18,11 +18,14 @@ package reactor.core.publisher;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.assertj.core.api.Assertions;
 import org.reactivestreams.Subscription;
 
-import reactor.core.Exceptions;
+import reactor.core.Scannable;
+import reactor.test.util.LoggerUtils;
 import reactor.test.StepVerifier;
+import reactor.test.util.TestLogger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -34,7 +37,7 @@ public class MonoPeekTest {
 		Mono<String> mp = Mono.error(new Exception("test"));
 		AtomicReference<Throwable> ref = new AtomicReference<>();
 
-		@SuppressWarnings("deprecation")
+		@SuppressWarnings("deprecation") // Because of doOnSuccessOrError, which will be removed in 3.5.0
 		Mono<String> mono = mp.doOnSuccessOrError((s, f) -> ref.set(f));
 
 		mono.subscribe();
@@ -47,7 +50,7 @@ public class MonoPeekTest {
 		Mono<String> mp = Mono.just("test");
 		AtomicReference<String> ref = new AtomicReference<>();
 
-		@SuppressWarnings("deprecation")
+		@SuppressWarnings("deprecation") // Because of doOnSuccessOrError, which will be removed in 3.5.0
 		Mono<String> mono = mp.doOnSuccessOrError((s, f) -> ref.set(s));
 
 		mono.subscribe();
@@ -63,7 +66,7 @@ public class MonoPeekTest {
 		mp.doOnTerminate(invoked::incrementAndGet)
 		  .subscribe();
 
-		assertThat(invoked.get()).isEqualTo(1);
+		assertThat(invoked).hasValue(1);
 	}
 
 	@Test
@@ -74,7 +77,7 @@ public class MonoPeekTest {
 		mp.doOnTerminate(invoked::incrementAndGet)
 		  .subscribe();
 
-		assertThat(invoked.get()).isEqualTo(1);
+		assertThat(invoked).hasValue(1);
 	}
 
 	@Test
@@ -99,7 +102,7 @@ public class MonoPeekTest {
 		            .expectNext("test")
 		            .verifyComplete();
 
-		assertThat(ref.get()).isEqualTo(123);
+		assertThat(ref).hasValue(123L);
 	}
 
 	@Test
@@ -145,29 +148,52 @@ public class MonoPeekTest {
 		Mono<String> mp = Mono.error(new TestException());
 		AtomicReference<Throwable> ref = new AtomicReference<>();
 
-		MonoProcessor<String> processor = mp.doOnError(RuntimeException.class, ref::set)
-		                                    .toProcessor();
-		processor.subscribe();
-		assertThat(processor.getError()).isInstanceOf(TestException.class);
+		StepVerifier.create(mp.doOnError(RuntimeException.class, ref::set))
+					.verifyError(TestException.class);
 
 		assertThat(ref.get()).isNull();
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void onMonoSuccessNullDoOnSuccess() {
 		Mono<String> mp = Mono.just("test");
-		mp.doOnSuccess(null)
-		  .subscribe();
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			mp.doOnSuccess(null)
+					.subscribe();
+		});
 	}
 
 	@Test
 	public void testErrorWithDoOnSuccess() {
-		assertThatExceptionOfType(RuntimeException.class)
-				.isThrownBy(() ->
-						Mono.error(new NullPointerException("boom"))
-						    .doOnSuccess(aValue -> {})
-						    .subscribe())
-				.withCauseInstanceOf(NullPointerException.class)
-				.matches(Exceptions::isErrorCallbackNotImplemented, "ErrorCallbackNotImplemented");
+		TestLogger testLogger = new TestLogger();
+		LoggerUtils.enableCaptureWith(testLogger);
+		try {
+			Mono.error(new NullPointerException("boom"))
+			    .doOnSuccess(aValue -> {
+			    })
+			    .subscribe();
+
+			Assertions.assertThat(testLogger.getErrContent())
+			          .contains("Operator called default onErrorDropped")
+			          .contains("reactor.core.Exceptions$ErrorCallbackNotImplemented: java.lang.NullPointerException: boom");
+		}
+		finally {
+			LoggerUtils.disableCapture();
+		}
 	}
+
+	@Test
+	public void scanOperator(){
+	    MonoPeek<Integer> test = new MonoPeek<>(Mono.just(1), null, null, null, null);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
+	public void scanFuseableOperator(){
+		MonoPeekFuseable<Integer> test = new MonoPeekFuseable<>(Mono.just(1), null, null, null, null);
+
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
 }

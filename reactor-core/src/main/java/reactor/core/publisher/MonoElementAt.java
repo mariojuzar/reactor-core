@@ -59,11 +59,19 @@ final class MonoElementAt<T> extends MonoFromFluxOperator<T, T>
 		return new ElementAtSubscriber<>(actual, index, defaultValue);
 	}
 
+	@Override
+	public Object scanUnsafe(Attr key) {
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
+	}
+
 	static final class ElementAtSubscriber<T>
 			extends Operators.MonoSubscriber<T, T> {
 		final T defaultValue;
 
 		long index;
+
+		final long target;
 
 		Subscription s;
 
@@ -73,6 +81,7 @@ final class MonoElementAt<T> extends MonoFromFluxOperator<T, T>
 											T defaultValue) {
 			super(actual);
 			this.index = index;
+			this.target = index;
 			this.defaultValue = defaultValue;
 		}
 
@@ -81,6 +90,7 @@ final class MonoElementAt<T> extends MonoFromFluxOperator<T, T>
 		public Object scanUnsafe(Attr key) {
 			if (key == Attr.TERMINATED) return done;
 			if (key == Attr.PARENT) return s;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 			return super.scanUnsafe(key);
 		}
@@ -150,8 +160,10 @@ final class MonoElementAt<T> extends MonoFromFluxOperator<T, T>
 				complete(defaultValue);
 			}
 			else{
-				actual.onError(Operators.onOperatorError(new
-						IndexOutOfBoundsException(), actual.currentContext()));
+				long count = target - index;
+				actual.onError(Operators.onOperatorError(new IndexOutOfBoundsException(
+								"source had " + count + " elements, expected at least " + (target + 1)),
+						actual.currentContext()));
 			}
 		}
 	}

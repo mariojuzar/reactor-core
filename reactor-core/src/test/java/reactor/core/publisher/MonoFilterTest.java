@@ -16,30 +16,34 @@
 
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.testng.Assert;
 import reactor.core.Exceptions;
+import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class MonoFilterTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new MonoFilter<Integer>(null, e -> true);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new MonoFilter<Integer>(null, e -> true);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void predicateNull() {
-		Mono.never()
-		    .filter(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Mono.never().filter(null);
+		});
 	}
 
 	@Test
 	public void normal() {
-
 		Mono.just(1)
 		    .filter(v -> v % 2 == 0)
 		    .subscribeWith(AssertSubscriber.create())
@@ -126,7 +130,8 @@ public class MonoFilterTest {
 	public void asyncFusion() {
 		AssertSubscriber<Object> ts = AssertSubscriber.create();
 
-		MonoProcessor<Integer> up = MonoProcessor.create();
+		//TODO find a suitable source that can be async fused (MonoProcessor was never fuseable)
+		NextProcessor<Integer> up = new NextProcessor<>(null);
 
 		up.filter(v -> (v & 1) == 0)
 		  .subscribe(ts);
@@ -142,7 +147,8 @@ public class MonoFilterTest {
 	public void asyncFusionBackpressured() {
 		AssertSubscriber<Object> ts = AssertSubscriber.create(1);
 
-		MonoProcessor<Integer> up = MonoProcessor.create();
+		//TODO find a suitable source that can be async fused (MonoProcessor was never fuseable)
+		NextProcessor<Integer> up = new NextProcessor<>(null);
 
 		Mono.just(1)
 		    .hide()
@@ -159,7 +165,7 @@ public class MonoFilterTest {
 			up.onNext(3);
 		}
 		catch(Exception e){
-			Assert.assertTrue(Exceptions.isCancel(e));
+			assertThat(Exceptions.isCancel(e)).isTrue();
 		}
 
 		ts.assertValues(2)
@@ -169,12 +175,7 @@ public class MonoFilterTest {
 
 	@Test
 	public void filterMono() {
-		MonoProcessor<Integer> mp = MonoProcessor.create();
-		StepVerifier.create(Mono.just(2).filter(s -> s % 2 == 0).subscribeWith(mp))
-		            .then(() -> assertThat(mp.isError()).isFalse())
-		            .then(() -> assertThat(mp.isSuccess()).isTrue())
-		            .then(() -> assertThat(mp.peek()).isEqualTo(2))
-		            .then(() -> assertThat(mp.isTerminated()).isTrue())
+		StepVerifier.create(Mono.just(2).filter(s -> s % 2 == 0))
 		            .expectNext(2)
 		            .verifyComplete();
 	}
@@ -182,12 +183,21 @@ public class MonoFilterTest {
 
 	@Test
 	public void filterMonoNot() {
-		MonoProcessor<Integer> mp = MonoProcessor.create();
-		StepVerifier.create(Mono.just(1).filter(s -> s % 2 == 0).subscribeWith(mp))
-		            .then(() -> assertThat(mp.isError()).isFalse())
-		            .then(() -> assertThat(mp.isSuccess()).isTrue())
-		            .then(() -> assertThat(mp.peek()).isNull())
-		            .then(() -> assertThat(mp.isTerminated()).isTrue())
+		StepVerifier.create(Mono.just(1).filter(s -> s % 2 == 0))
 		            .verifyComplete();
+	}
+
+	@Test
+	public void scanOperator() {
+		MonoFilter<Integer> test = new MonoFilter<>(Mono.just(1), (v -> v % 2 != 0));
+
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
+	public void scanFuseableOperator() {
+		MonoFilterFuseable<Integer> test = new MonoFilterFuseable<>(Mono.just(1), (v -> v % 2 != 0));
+
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 }

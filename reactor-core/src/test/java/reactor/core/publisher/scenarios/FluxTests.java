@@ -46,12 +46,10 @@ import java.util.logging.Level;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.assertj.core.api.Assertions;
-import org.hamcrest.Matcher;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 
@@ -59,36 +57,39 @@ import reactor.core.CoreSubscriber;
 import reactor.core.Disposable;
 import reactor.core.Exceptions;
 import reactor.core.Fuseable;
-import reactor.core.publisher.EmitterProcessor;
+import reactor.core.Scannable;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxProcessor;
 import reactor.core.publisher.Hooks;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.MonoProcessor;
 import reactor.core.publisher.Operators;
-import reactor.core.publisher.ReplayProcessor;
 import reactor.core.publisher.Signal;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
+import reactor.test.AutoDisposingExtension;
+import reactor.test.util.LoggerUtils;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
+import reactor.test.util.TestLogger;
 import reactor.util.Logger;
 import reactor.util.Loggers;
+import reactor.util.concurrent.Queues;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.number.OrderingComparison.lessThan;
-import static org.junit.Assert.*;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.fail;
+import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
 
 public class FluxTests extends AbstractReactorTest {
 
 	static final Logger LOG = Loggers.getLogger(FluxTests.class);
 
 	static final String2Integer STRING_2_INTEGER = new String2Integer();
+
+	@RegisterExtension
+	AutoDisposingExtension afterTest = new AutoDisposingExtension();
 
 	@Test
 	public void discardLocalMultipleFilters() {
@@ -107,8 +108,8 @@ public class FluxTests extends AbstractReactorTest {
 		            .expectComplete()
 		            .verify();
 
-		Assertions.assertThat(discardNumberCount).hasValue(6); //1 3 5 7 9 11
-		Assertions.assertThat(discardStringCount).hasValue(2); //10 12
+		assertThat(discardNumberCount).hasValue(6); //1 3 5 7 9 11
+		assertThat(discardStringCount).hasValue(2); //10 12
 	}
 
 	@Test
@@ -125,7 +126,7 @@ public class FluxTests extends AbstractReactorTest {
 		            .expectComplete()
 		            .verify();
 
-		Assertions.assertThat(discardOrder).containsExactly("FIRST", "SECOND");
+		assertThat(discardOrder).containsExactly("FIRST", "SECOND");
 	}
 
 	@Test
@@ -153,7 +154,7 @@ public class FluxTests extends AbstractReactorTest {
 		List<String> signalsConcat = concatMap.collectList().block();
 		List<String> signalsFlat = flatMap.collectList().block();
 
-		Assertions.assertThat(signalsConcat)
+		assertThat(signalsConcat)
 		          .containsExactlyElementsOf(signalsFlat);
 	}
 
@@ -189,14 +190,14 @@ public class FluxTests extends AbstractReactorTest {
 		List<String> signalsConcat = concatMap.collectList().block();
 		List<String> signalsFlat = flatMap.collectList().block();
 
-		Assertions.assertThat(signalsConcat)
+		assertThat(signalsConcat)
 		          .containsExactlyElementsOf(signalsFlat);
 
 		List<String> flatSuppressedMessages = flatSuppressed
 				.stream()
 				.map(Throwable::getMessage)
 				.collect(Collectors.toList());
-		Assertions.assertThat(concatSuppressed)
+		assertThat(concatSuppressed)
 		          .extracting(Throwable::getMessage)
 		          .containsExactlyElementsOf(flatSuppressedMessages);
 	}
@@ -217,12 +218,12 @@ public class FluxTests extends AbstractReactorTest {
 		            .expectComplete()
 		            .verify();
 
-		assertThat(signals.size(), is(3));
-		assertThat("onNext signal are not reused", signals.get(0).get(), is(2));
-		assertThat("onNext signal isn't last value", signals.get(1).get(), is(2));
-		assertTrue("onComplete expected", signals.get(2).isOnComplete());
-		assertThat("1st onNext value unexpected", values.get(0), is(1));
-		assertThat("2nd onNext value unexpected", values.get(1), is(2));
+		assertThat(signals).hasSize(3);
+		assertThat(signals.get(0).get()).withFailMessage("onNext signal are not reused"). isEqualTo(2);
+		assertThat(signals.get(1).get()).withFailMessage("onNext signal isn't last value").isEqualTo(2);
+		assertThat(signals.get(2).isOnComplete()).as("last signal isOnComplete()?").isTrue();
+		assertThat(values.get(0)).as("1st onNext value").isEqualTo(1);
+		assertThat(values.get(1)).as("2nd onNext value").isEqualTo(2);
 	}
 
 	@Test
@@ -238,7 +239,7 @@ public class FluxTests extends AbstractReactorTest {
 		            .expectComplete()
 		            .verify();
 
-		assertThat(signals.size(), is(2));
+		assertThat(signals).hasSize(2);
 
 		int nextValue = 0;
 		boolean foundComplete = false;
@@ -249,9 +250,9 @@ public class FluxTests extends AbstractReactorTest {
 			else foundOther = true;
 		}
 
-		assertEquals(1000, nextValue);
-		assertTrue("onComplete expected", foundComplete);
-		assertFalse("either onNext or onComplete expected", foundOther);
+		assertThat(nextValue).isEqualTo(1000);
+		assertThat(foundComplete).as("foundComplete").isTrue();
+		assertThat(foundOther).as("foundOther").isFalse();
 	}
 
 	@Test
@@ -264,15 +265,16 @@ public class FluxTests extends AbstractReactorTest {
 		            .expectErrorMessage("foo")
 		            .verify();
 
-		assertThat(signals.size(), is(1));
-		assertTrue("onError expected", signals.get(0).isOnError());
-		assertThat("plain exception expected", signals.get(0).getThrowable().getMessage(),
-				is("foo"));
+		assertThat(signals).hasSize(1);
+		assertThat(signals.get(0).isOnError()).as("first signal isOnError?").isTrue();
+		assertThat(signals.get(0).getThrowable()).as("first signal throwable").hasMessage("foo");
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void testDoOnEachSignalNullConsumer() {
-		Flux.just(1).doOnEach(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.just(1).doOnEach(null);
+		});
 	}
 
 	@Test
@@ -309,7 +311,7 @@ public class FluxTests extends AbstractReactorTest {
 		Flux<String> stream = Flux.just("Hello World!");
 		Flux<String> s = stream.map(s1 -> "Goodbye then!");
 
-		await(s, is("Goodbye then!"));
+		assertThat(await(s)).isEqualTo("Goodbye then!");
 	}
 
 	@Test
@@ -325,21 +327,7 @@ public class FluxTests extends AbstractReactorTest {
 				                          return sum;
 			                          }
 		                          });
-		await(5, s, is(15));
-	}
-
-	@Test
-	public void simpleReactiveSubscriber() throws InterruptedException {
-		EmitterProcessor<String> str = EmitterProcessor.create();
-
-		str.publishOn(asyncGroup)
-		   .subscribe(new FooSubscriber());
-
-		str.onNext("Goodbye World!");
-		str.onNext("Goodbye World!");
-		str.onComplete();
-
-		Thread.sleep(500);
+		assertThat(await(5, s)).isEqualTo(15);
 	}
 
 	@Test
@@ -348,7 +336,7 @@ public class FluxTests extends AbstractReactorTest {
 		Flux<Integer> s = stream.map(STRING_2_INTEGER)
 		                           .filter(i -> i % 2 == 0);
 
-		await(2, s, is(4));
+		assertThat(await(2, s)).isEqualTo(4);
 	}
 
 	@Test
@@ -371,8 +359,8 @@ public class FluxTests extends AbstractReactorTest {
 		                          })
 		                           .doOnError(IllegalArgumentException.class, e -> exception.set(true));
 
-		await(5, s, is(10));
-		assertThat("error triggered", exception.get(), is(true));
+		assertThat(await(5, s)).isEqualTo(10);
+		assertThat(exception).as("error triggered").isTrue();
 	}
 
 	@Test
@@ -380,7 +368,7 @@ public class FluxTests extends AbstractReactorTest {
 		Flux<String> stream = Flux.just("1", "2", "3", "4", "5");
 		Mono<Integer> s = stream.map(STRING_2_INTEGER)
 		                          .reduce(1, (acc, next) -> acc * next);
-		await(1, s, is(120));
+		assertThat(await(1, s)).isEqualTo(120);
 	}
 
 	@Test
@@ -392,7 +380,7 @@ public class FluxTests extends AbstractReactorTest {
 		                         .log("merge")
 		                         .map(STRING_2_INTEGER)
 		                         .reduce(1, (acc, next) -> acc * next);
-		await(1, s, is(120));
+		assertThat(await(1, s)).isEqualTo(120);
 	}
 
 	@Test
@@ -410,8 +398,8 @@ public class FluxTests extends AbstractReactorTest {
 			}
 		});
 
-		assertThat("batchCount is 3", batchCount.get(), is(1));
-		assertThat("count is 15", count.get(), is(15));
+		assertThat(batchCount).hasValue(1);
+		assertThat(count).hasValue(15);
 	}
 
 	@Test
@@ -438,64 +426,64 @@ public class FluxTests extends AbstractReactorTest {
 			                          }
 		                          });
 
-		await(2, s, is(3));
-		assertThat("error handler was invoked", latch.getCount(), is(0L));
+		assertThat(await(2, s)).isEqualTo(3);
+		assertThat(latch.getCount()).as("error handler latch count").isEqualTo(0L);
 	}
 
 	@Test
 	public void promiseAcceptCountCannotExceedOne() {
-		MonoProcessor<Object> deferred = MonoProcessor.create();
-		deferred.onNext("alpha");
+		Sinks.One<Object> deferred = Sinks.one();
+		deferred.emitValue("alpha", FAIL_FAST);
 		try {
-			deferred.onNext("bravo");
+			deferred.emitValue("bravo", FAIL_FAST);
 		}
 		catch (Exception e) {
 			if(!Exceptions.isCancel(e)) {
 				throw e;
 			}
 		}
-		assertEquals(deferred.block(), "alpha");
+		assertThat(deferred.asMono().block()).isEqualTo("alpha");
 	}
 
 	@Test
 	public void promiseErrorCountCannotExceedOne() {
-		MonoProcessor<Object> deferred = MonoProcessor.create();
+		Sinks.One<Object> deferred = Sinks.one();
 		Throwable error = new IOException("foo");
 
-		StepVerifier.create(deferred)
+		StepVerifier.create(deferred.asMono())
 		            .then(() -> {
-			            deferred.onError(error);
-			            deferred.onNext(error);
+			            deferred.emitError(error, FAIL_FAST);
+			            deferred.emitValue(error, FAIL_FAST);
 		            })
 		            .expectErrorMessage("foo")
 		            .verifyThenAssertThat()
 		            .hasDroppedExactly(error);
 
-		Assertions.assertThat(deferred.getError()).isSameAs(error);
+		assertThat(Scannable.from(deferred).scan(Scannable.Attr.ERROR)).isSameAs(error);
 	}
 
 	@Test
 	public void promiseAcceptCountAndErrorCountCannotExceedOneInTotal() {
-		MonoProcessor<Object> deferred = MonoProcessor.create();
+		Sinks.One<Object> deferred = Sinks.one();
 		Throwable error = new IOException("foo");
 
-		StepVerifier.create(deferred)
+		StepVerifier.create(deferred.asMono())
 		            .then(() -> {
-			            deferred.onError(error);
-			            deferred.onNext("alpha");
+			            deferred.emitError(error, FAIL_FAST);
+			            deferred.emitValue("alpha", FAIL_FAST);
 		            })
 		            .expectErrorMessage("foo")
 		            .verifyThenAssertThat()
 		            .hasDroppedExactly("alpha");
 
-		Assertions.assertThat(deferred.getError()).isSameAs(error);
+		assertThat(Scannable.from(deferred).scan(Scannable.Attr.ERROR)).isSameAs(error);
 	}
 
-	<T> void await(Flux<T> s, Matcher<T> expected) throws InterruptedException {
-		await(1, s, expected);
+	private <T> T await(Flux<T> s) throws InterruptedException {
+		return await(1, s);
 	}
 
-	<T> void await(int count, final Publisher<T> s, Matcher<T> expected) throws InterruptedException {
+	private <T> T await(int count, final Publisher<T> s) {
 		final CountDownLatch latch = new CountDownLatch(count);
 		final AtomicReference<T> ref = new AtomicReference<>();
 		Flux.from(s).subscribe(t -> {
@@ -510,7 +498,6 @@ public class FluxTests extends AbstractReactorTest {
 		T result = null;
 		try {
 			latch.await(10, TimeUnit.SECONDS);
-
 			result = ref.get();
 		}
 		catch (Exception e) {
@@ -518,8 +505,8 @@ public class FluxTests extends AbstractReactorTest {
 		}
 		long duration = System.currentTimeMillis() - startTime;
 
-		assertThat(result, expected);
-		assertThat(duration, is(lessThan(2000L)));
+		assertThat(duration).isLessThan(2000L);
+		return result;
 	}
 
 	static class String2Integer implements Function<String, Integer> {
@@ -532,11 +519,12 @@ public class FluxTests extends AbstractReactorTest {
 
 	@Test
 	public void analyticsTest() throws Exception {
-		ReplayProcessor<Integer> source = ReplayProcessor.create();
+		Sinks.Many<Integer> source = Sinks.many().replay().all();
 
 		long avgTime = 50l;
 
 		Mono<Long> result = source
+				.asFlux()
 				.log("delay")
 				.publishOn(asyncGroup)
 		                          .delayElements(Duration.ofMillis(avgTime))
@@ -552,14 +540,15 @@ public class FluxTests extends AbstractReactorTest {
 		                          .log("reduced-elapsed")
 		                          .cache();
 
-		source.subscribe();
+		source.asFlux()
+			  .subscribe();
 
 		for (int j = 0; j < 10; j++) {
-			source.onNext(1);
+			source.emitNext(1, FAIL_FAST);
 		}
-		source.onComplete();
+		source.emitComplete(FAIL_FAST);
 
-		Assert.assertTrue(result.block(Duration.ofSeconds(5)) >= avgTime * 0.6);
+		assertThat(result.block(Duration.ofSeconds(5))).isGreaterThanOrEqualTo((long)(avgTime * 0.6));
 	}
 
 	@Test
@@ -579,8 +568,9 @@ public class FluxTests extends AbstractReactorTest {
 
 		final CountDownLatch latch = new CountDownLatch(iterations);
 
-		EmitterProcessor<String> deferred = EmitterProcessor.create();
-		deferred.publishOn(asyncGroup)
+		Sinks.Many<String> deferred = Sinks.many().multicast().onBackpressureBuffer();
+		deferred.asFlux()
+				.publishOn(asyncGroup)
 		        .parallel(8)
 		        .groups()
 		        .subscribe(stream -> stream.publishOn(asyncGroup)
@@ -599,7 +589,13 @@ public class FluxTests extends AbstractReactorTest {
 		long start = System.currentTimeMillis();
 
 		for (String i : data) {
-			deferred.onNext(i);
+			long busyLoops = 0;
+			while (deferred.tryEmitNext(i).isFailure()) {
+				busyLoops++;
+				if (busyLoops % 5000 == 0 && System.currentTimeMillis() - start >= 10_0000) {
+					throw new RuntimeException("Busy loop timed out");
+				}
+			}
 		}
 		if (!latch.await(10, TimeUnit.SECONDS)) {
 			throw new RuntimeException(latch.getCount()+ " ");
@@ -612,7 +608,7 @@ public class FluxTests extends AbstractReactorTest {
 		System.out.println("ev/ms: " + iterations / stop);
 		System.out.println("ev/s: " + iterations / stop * 1000);
 		System.out.println();
-		assertEquals(0, latch.getCount());
+		assertThat(latch.getCount()).isEqualTo(0);
 	}
 
 	private void parallelTest(String dispatcher, int iterations) throws InterruptedException {
@@ -622,11 +618,12 @@ public class FluxTests extends AbstractReactorTest {
 
 		int[] data;
 		CountDownLatch latch = new CountDownLatch(iterations);
-		EmitterProcessor<Integer> deferred;
+		Sinks.Many<Integer> deferred;
 		switch (dispatcher) {
 			case "partitioned":
-				deferred = EmitterProcessor.create();
-				deferred.publishOn(asyncGroup)
+				deferred = Sinks.many().multicast().onBackpressureBuffer();
+				deferred.asFlux()
+						.publishOn(asyncGroup)
 				        .parallel(2)
 				        .groups()
 				        .subscribe(stream -> stream.publishOn(asyncGroup)
@@ -637,8 +634,9 @@ public class FluxTests extends AbstractReactorTest {
 				break;
 
 			default:
-				deferred = EmitterProcessor.create();
-				deferred.publishOn(asyncGroup)
+				deferred = Sinks.many().multicast().onBackpressureBuffer();
+				deferred.asFlux()
+						.publishOn(asyncGroup)
 				        .map(i -> i)
 				        .scan(1, (acc, next) -> acc + next)
 				        .subscribe(i -> latch.countDown());
@@ -651,7 +649,13 @@ public class FluxTests extends AbstractReactorTest {
 
 		long start = System.currentTimeMillis();
 		for (int i : data) {
-			deferred.onNext(i);
+			long busyLoops = 0;
+			while (deferred.tryEmitNext(i).isFailure()) {
+				busyLoops++;
+				if (busyLoops % 5000 == 0 && System.currentTimeMillis() - start >= 10_0000) {
+					throw new RuntimeException("Busy loop timed out");
+				}
+			}
 		}
 
 		if (!latch.await(15, TimeUnit.SECONDS)) {
@@ -665,7 +669,7 @@ public class FluxTests extends AbstractReactorTest {
 		System.out.println("ev/ms: " + iterations / stop);
 		System.out.println("ev/s: " + iterations / stop * 1000);
 		System.out.println();
-		assertEquals(0, latch.getCount());
+		assertThat(latch.getCount()).isEqualTo(0);
 
 	}
 
@@ -676,18 +680,19 @@ public class FluxTests extends AbstractReactorTest {
 
 		int[] data;
 		CountDownLatch latch = new CountDownLatch(iterations);
-		EmitterProcessor<Integer> mapManydeferred;
+		Sinks.Many<Integer> mapManydeferred;
 		switch (dispatcher) {
 			case "partitioned":
-				mapManydeferred = EmitterProcessor.create();
-				mapManydeferred.parallel(4)
+				mapManydeferred = Sinks.many().multicast().onBackpressureBuffer();
+				mapManydeferred.asFlux()
+							   .parallel(4)
 				               .groups()
 				               .subscribe(substream -> substream.publishOn(asyncGroup)
 				                                              .subscribe(i -> latch.countDown()));
 				break;
 			default:
-				mapManydeferred = EmitterProcessor.create();
-				("sync".equals(dispatcher) ? mapManydeferred : mapManydeferred.publishOn(asyncGroup))
+				mapManydeferred = Sinks.many().multicast().onBackpressureBuffer();
+				("sync".equals(dispatcher) ? mapManydeferred.asFlux() : mapManydeferred.asFlux().publishOn(asyncGroup))
 				               .flatMap(Flux::just)
 				               .subscribe(i -> latch.countDown());
 		}
@@ -699,7 +704,13 @@ public class FluxTests extends AbstractReactorTest {
 		long start = System.currentTimeMillis();
 
 		for (int i : data) {
-			mapManydeferred.onNext(i);
+			long busyLoops = 0;
+			while (mapManydeferred.tryEmitNext(i).isFailure()) {
+				busyLoops++;
+				if (busyLoops % 5000 == 0 && System.currentTimeMillis() - start >= 10_0000) {
+					throw new RuntimeException("Busy loop timed out");
+				}
+			}
 		}
 
 		if (!latch.await(20, TimeUnit.SECONDS)) {
@@ -708,7 +719,7 @@ public class FluxTests extends AbstractReactorTest {
 		else {
 			System.out.println(latch.getCount());
 		}
-		assertEquals(0, latch.getCount());
+		assertThat(latch.getCount()).isEqualTo(0);
 
 		long stop = System.currentTimeMillis() - start;
 		stop = stop > 0 ? stop : 1;
@@ -732,7 +743,7 @@ public class FluxTests extends AbstractReactorTest {
 		assertThat(stream.parallel(2)
 		                 .groups()
 		                 .count()
-		                 .block(), is(equalTo(2L)));
+		                 .block()).isEqualTo(2);
 	}
 
 	/**
@@ -763,13 +774,14 @@ public class FluxTests extends AbstractReactorTest {
 		 */
 		final double TOLERANCE = 0.9;
 
-		FluxProcessor<Integer, Integer> batchingStreamDef = EmitterProcessor.create();
+		Sinks.Many<Integer> batchingStreamDef = Sinks.many().multicast().onBackpressureBuffer();
 
 		List<Integer> testDataset = createTestDataset(NUM_MESSAGES);
 
 		final CountDownLatch latch = new CountDownLatch(NUM_MESSAGES);
 		Map<Integer, Integer> batchesDistribution = new ConcurrentHashMap<>();
-		batchingStreamDef.publishOn(asyncGroup)
+		batchingStreamDef.asFlux()
+						 .publishOn(asyncGroup)
 		                 .parallel(PARALLEL_STREAMS)
 		                 .groups()
 		                 .subscribe(substream -> substream.hide().publishOn(asyncGroup)
@@ -780,7 +792,16 @@ public class FluxTests extends AbstractReactorTest {
 			                                                items.forEach(item -> latch.countDown());
 		                                                }));
 
-		testDataset.forEach(batchingStreamDef::onNext);
+		final long start = System.currentTimeMillis();
+		testDataset.forEach(data -> {
+			long busyLoops = 0;
+			while (batchingStreamDef.tryEmitNext(data).isFailure()) {
+				busyLoops++;
+				if (busyLoops % 5000 == 0 && System.currentTimeMillis() - start >= 10_0000) {
+					throw new RuntimeException("Busy loop timed out");
+				}
+			}
+		});
 
 		System.out.println(batchesDistribution);
 
@@ -795,10 +816,10 @@ public class FluxTests extends AbstractReactorTest {
 		                                           .reduce(Integer::sum)
 		                                           .getAsInt();
 
-		assertEquals(NUM_MESSAGES, messagesProcessed);
-		assertTrue("Less than 90% (" + NUM_MESSAGES / BATCH_SIZE * TOLERANCE +
-						") of the batches are matching the buffer size: " + batchesDistribution.get(BATCH_SIZE),
-				NUM_MESSAGES / BATCH_SIZE * TOLERANCE >= batchesDistribution.get(BATCH_SIZE) * TOLERANCE);
+		assertThat(messagesProcessed).isEqualTo(NUM_MESSAGES);
+		assertThat(NUM_MESSAGES / BATCH_SIZE * TOLERANCE)
+				.as("Less than 90% (%d) of the batches are matching the buffer size: %d", NUM_MESSAGES / BATCH_SIZE * TOLERANCE, batchesDistribution.get(BATCH_SIZE))
+				.isGreaterThanOrEqualTo(batchesDistribution.get(BATCH_SIZE) * TOLERANCE);
 	}
 
 	@Test
@@ -809,7 +830,7 @@ public class FluxTests extends AbstractReactorTest {
 		                  .count()
 		                  .block(Duration.ofSeconds(5));
 
-		assertTrue("Latch is " + res, res == 2_000_000);
+		assertThat(res).as("latch value").isEqualTo(2_000_000);
 	}
 	@Test
 	public void cancelOn() throws Exception {
@@ -823,19 +844,19 @@ public class FluxTests extends AbstractReactorTest {
 		                     .cancelOn(asyncGroup)
 		                     .subscribe();
 		res.dispose();
-		assertTrue(countDownLatch.await(3, TimeUnit.SECONDS));
-		assertTrue(thread.get() != Thread.currentThread());
+		assertThat(countDownLatch.await(3, TimeUnit.SECONDS)).isTrue();
+		assertThat(thread.get()).isNotSameAs(Thread.currentThread());
 	}
 
 	@Test
 	public void sequenceEqual() throws Exception {
 		boolean res = Mono.sequenceEqual(Flux.just(1, 2, 3), Flux.just(1, 2, 3))
 		                  .block();
-		assertTrue(res);
+		assertThat(res).isTrue();
 
 		res = Mono.sequenceEqual(Flux.just(1, 3), Flux.just(1, 2, 3))
 		                  .block();
-		assertFalse(res);
+		assertThat(res).isFalse();
 	}
 
 	@Test
@@ -844,25 +865,25 @@ public class FluxTests extends AbstractReactorTest {
 			Flux<String> as = Flux.just("x");
 			Flux<String> bs = Flux.just((String)null);
 
-			assertNull(Flux.zip(as, bs).next().block());
+			assertThat(Flux.zip(as, bs).next().block()).isNull();
+			fail("Exception expected");
 		}
 		catch (NullPointerException npe) {
 			return;
 		}
-		assertFalse("Should have failed", true);
 
 	}
 
 	@Test
 	public void shouldCorrectlyDispatchComplexFlow() throws InterruptedException {
-		EmitterProcessor<Integer> globalFeed = EmitterProcessor.create();
+		Sinks.Many<Integer> globalFeed = Sinks.many().multicast().onBackpressureBuffer();
 
 		CountDownLatch afterSubscribe = new CountDownLatch(1);
 		CountDownLatch latch = new CountDownLatch(4);
 
 		Flux<Integer> s = Flux.just("2222")
 		                            .map(Integer::parseInt)
-		                            .flatMap(l -> Flux.merge(globalFeed.publishOn(asyncGroup),
+		                            .flatMap(l -> Flux.merge(globalFeed.asFlux().publishOn(asyncGroup),
 				                           Flux.just(1111, l, 3333, 4444, 5555, 6666)).log("merged")
 		                                                                                 .publishOn(asyncGroup)
 		                                                                                 .log("dispatched")
@@ -882,11 +903,11 @@ public class FluxTests extends AbstractReactorTest {
 
 		afterSubscribe.await(5, TimeUnit.SECONDS);
 
-		globalFeed.onNext(2223);
-		globalFeed.onNext(2224);
+		globalFeed.emitNext(2223, FAIL_FAST);
+		globalFeed.emitNext(2224, FAIL_FAST);
 
 		latch.await(5, TimeUnit.SECONDS);
-		assertEquals("Must have counted 4 elements", 0, latch.getCount());
+		assertThat(latch.getCount()).as("latch count").isEqualTo(0);
 
 	}
 
@@ -914,7 +935,7 @@ public class FluxTests extends AbstractReactorTest {
 		}
 
 		latch.await(15, TimeUnit.SECONDS);
-		assertEquals(0, latch.getCount());
+		assertThat(latch.getCount()).isEqualTo(0);
 	}
 
 	/**
@@ -923,7 +944,7 @@ public class FluxTests extends AbstractReactorTest {
 	 */
 	@Test
 	public void testParallelWithJava8StreamsInput() throws InterruptedException {
-		Scheduler supplier = Schedulers.newParallel("test-p", 2);
+		Scheduler supplier = afterTest.autoDispose(Schedulers.newParallel("test-p", 2));
 
 		int max = ThreadLocalRandom.current()
 		                           .nextInt(100, 300);
@@ -937,7 +958,7 @@ public class FluxTests extends AbstractReactorTest {
 		      .subscribe(v -> countDownLatch.countDown());
 
 		countDownLatch.await(10, TimeUnit.SECONDS);
-		Assert.assertEquals(0, countDownLatch.getCount());
+		assertThat(countDownLatch.getCount()).isEqualTo(0);
 	}
 
 	@Test
@@ -960,7 +981,7 @@ public class FluxTests extends AbstractReactorTest {
 		                                    .subscribe(v -> countDownLatch.countDown(), Throwable::printStackTrace));
 
 		countDownLatch.await(5, TimeUnit.SECONDS);
-		Assert.assertEquals("Count max: "+ tasks.size(), 0, countDownLatch.getCount());
+		assertThat(countDownLatch.getCount()).as("Count max: %d", tasks.size()).isEqualTo(0);
 	}
 
 	private static final class Point {
@@ -1064,7 +1085,7 @@ public class FluxTests extends AbstractReactorTest {
 
 		endLatch.await(10, TimeUnit.SECONDS);
 
-		Assert.assertEquals(0, endLatch.getCount());
+		assertThat(endLatch.getCount()).isEqualTo(0);
 	}
 
 	@Test
@@ -1075,8 +1096,9 @@ public class FluxTests extends AbstractReactorTest {
 		int parallelStreams = 16;
 		CountDownLatch latch = new CountDownLatch(1);
 
-		final EmitterProcessor<Integer> streamBatcher = EmitterProcessor.create();
-		streamBatcher.publishOn(asyncGroup)
+		final Sinks.Many<Integer> streamBatcher = Sinks.many().multicast().onBackpressureBuffer();
+		streamBatcher.asFlux()
+					 .publishOn(asyncGroup)
 		             .bufferTimeout(batchsize, Duration.ofSeconds(timeout))
 		             .log("batched")
 		             .parallel(parallelStreams)
@@ -1086,17 +1108,17 @@ public class FluxTests extends AbstractReactorTest {
 		                                                .doOnError(Throwable::printStackTrace)
 		                                                .subscribe(i -> latch.countDown()));
 
-		streamBatcher.onNext(12);
-		streamBatcher.onNext(123);
-		streamBatcher.onNext(42);
-		streamBatcher.onNext(666);
+		streamBatcher.emitNext(12, FAIL_FAST);
+		streamBatcher.emitNext(123, FAIL_FAST);
+		streamBatcher.emitNext(42, FAIL_FAST);
+		streamBatcher.emitNext(666, FAIL_FAST);
 
 		boolean finished = latch.await(2, TimeUnit.SECONDS);
 		if (!finished) {
 			throw new RuntimeException(latch.getCount()+"");
 		}
 		else {
-			assertEquals("Must have correct latch number : " + latch.getCount(), latch.getCount(), 0);
+			assertThat(latch.getCount()).as("latch count").isEqualTo(0);
 		}
 	}
 
@@ -1114,8 +1136,8 @@ public class FluxTests extends AbstractReactorTest {
 
 	@Test
 	public void consistentMultithreadingWithPartition() throws InterruptedException {
-		Scheduler supplier1 = Schedulers.newParallel("groupByPool", 2);
-		Scheduler supplier2 = Schedulers.newParallel("partitionPool", 5);
+		Scheduler supplier1 = afterTest.autoDispose(Schedulers.newParallel("groupByPool", 2));
+		Scheduler supplier2 = afterTest.autoDispose(Schedulers.newParallel("partitionPool", 5));
 
 		CountDownLatch latch = new CountDownLatch(10);
 
@@ -1134,9 +1156,7 @@ public class FluxTests extends AbstractReactorTest {
 
 
 		latch.await(30, TimeUnit.SECONDS);
-		assertThat("Not totally dispatched: " + latch.getCount(), latch.getCount() == 0);
-		supplier1.dispose();
-		supplier2.dispose();
+		assertThat(latch.getCount()).as("dispatch count").isEqualTo(0L);
 	}
 
 	@Test
@@ -1150,8 +1170,8 @@ public class FluxTests extends AbstractReactorTest {
 					}
 					sink.complete();
 				}).
-				    subscribeOn(Schedulers.newSingle("production")).
-				    publishOn(Schedulers.elastic()).
+				    subscribeOn(afterTest.autoDispose(Schedulers.newSingle("production"))).
+				    publishOn(Schedulers.boundedElastic()).
 				    subscribe(i -> {
 					    LockSupport.parkNanos(100L);
 					    latch.countDown();
@@ -1170,23 +1190,28 @@ public class FluxTests extends AbstractReactorTest {
 		        .limitRate(1)
 		       .subscribe(t -> latch.countDown());
 
-		assertThat("Not totally dispatched", latch.await(30, TimeUnit.SECONDS));
+		latch.await(30, TimeUnit.SECONDS);
+		assertThat(latch.getCount()).as("dispatch count").isEqualTo(0L);
 	}
 	@Test
-	public void unimplementedErrorCallback() throws InterruptedException {
-
-		Flux.error(new Exception("forced"))
-		       .log("error")
-		       .subscribe();
-
-		try{
-			Flux.error(new Exception("forced"))
+	public void unimplementedErrorCallback() {
+		TestLogger testLogger = new TestLogger();
+		LoggerUtils.enableCaptureWith(testLogger);
+		try {
+			Flux.error(new Exception("forced1"))
+			    .log("error")
 			    .subscribe();
+
+			Flux.error(new Exception("forced2"))
+			    .subscribe();
+
+			assertThat(testLogger.getErrContent())
+			          .contains("Operator called default onErrorDropped")
+			          .contains("reactor.core.Exceptions$ErrorCallbackNotImplemented: java.lang.Exception: forced2");
 		}
-		catch(Exception e){
-			return;
+		finally {
+			LoggerUtils.disableCapture();
 		}
-		fail();
 	}
 
 	@Test
@@ -1210,10 +1235,16 @@ public class FluxTests extends AbstractReactorTest {
 
 		Phaser phaser = new Phaser(2);
 
-		Flux<Object> s1 = ReplayProcessor.cacheLastOrDefault(new Object())
-		                                 .publishOn(asyncGroup);
-		Flux<Object> s2 = ReplayProcessor.cacheLastOrDefault(new Object())
-		                                .publishOn(asyncGroup);
+		Flux<Object> s1 = Sinks.unsafe().many()
+							   .replay()
+							   .latestOrDefault(new Object())
+							   .asFlux()
+							   .publishOn(asyncGroup);
+		Flux<Object> s2 = Sinks.unsafe().many()
+							   .replay()
+							   .latestOrDefault(new Object())
+							   .asFlux()
+							   .publishOn(asyncGroup);
 
 		// The following works:
 		//List<Flux<Object>> list = Arrays.collectList(s1);
@@ -1229,7 +1260,7 @@ public class FluxTests extends AbstractReactorTest {
 		       .subscribe();
 
 		phaser.awaitAdvanceInterruptibly(phaser.arrive(), 1, TimeUnit.SECONDS);
-		Assert.assertNotNull(ref.get());
+		assertThat(ref).doesNotHaveValue(null);
 	}
 
 	/**
@@ -1241,7 +1272,7 @@ public class FluxTests extends AbstractReactorTest {
 	 * @throws TimeoutException     - on failure. <p> by @masterav10 : https://github.com/reactor/reactor/issues/469
 	 */
 	@Test
-	@Ignore
+	@Disabled
 	public void endLessTimer() throws InterruptedException, TimeoutException {
 		int tasks = 50;
 		long delayMS = 50; // XXX: Fails when less than 100
@@ -1268,15 +1299,15 @@ public class FluxTests extends AbstractReactorTest {
 		barrier.awaitAdvanceInterruptibly(barrier.arrive(), tasks * delayMS + 1000, TimeUnit.MILLISECONDS);
 		ctrl.dispose();
 
-		Assert.assertEquals(tasks, times.size());
+		assertThat(times.size()).isEqualTo(tasks);
 
 		for (int i = 1; i < times.size(); i++) {
 			Long prev = times.get(i - 1);
 			Long time = times.get(i);
 
-			Assert.assertTrue(prev > 0);
-			Assert.assertTrue(time > 0);
-			Assert.assertTrue("was " + (time - prev), time - prev <= delayMS * 1.2);
+			assertThat(prev).isGreaterThan(0L);
+			assertThat(time).isGreaterThan(0L);
+			assertThat(time - prev).isLessThanOrEqualTo((long) (delayMS * 1.2));
 		}
 	}
 
@@ -1336,44 +1367,56 @@ public class FluxTests extends AbstractReactorTest {
 	 *                 splitStream
 	 *             observedSplitStream
 	 * </pre>
-     * @throws Exception for convenience
 	 */
-	@Test(timeout = TIMEOUT)
-	public void multiplexUsingDispatchersAndSplit() throws Exception {
+	@Test
+	@Timeout(10)
+	public void multiplexUsingDispatchersAndSplit() {
+		final Sinks.Many<Integer> forkEmitterProcessor = Sinks.many().multicast().onBackpressureBuffer();
+		final Sinks.Many<Integer> computationEmitterProcessor = Sinks.unsafe()
+		                                                             .many()
+																	 .multicast()
+																	 .onBackpressureBuffer(256, false);
 
-		final EmitterProcessor<Integer> forkEmitterProcessor = EmitterProcessor.create();
-
-		final EmitterProcessor<Integer> computationEmitterProcessor = EmitterProcessor.create(false);
-
-		Scheduler computation = Schedulers.newSingle("computation");
-		Scheduler persistence = Schedulers.newSingle("persistence");
-		Scheduler forkJoin = Schedulers.newParallel("forkJoin", 2);
+		Scheduler computation = afterTest.autoDispose(Schedulers.newSingle("computation"));
+		Scheduler persistence = afterTest.autoDispose(Schedulers.newSingle("persistence"));
+		Scheduler forkJoin = afterTest.autoDispose(Schedulers.newParallel("forkJoin", 2));
 
 		final Flux<List<String>> computationStream =
-				computationEmitterProcessor.publishOn(computation)
-				                      .map(i -> {
-					                      final List<String> list = new ArrayList<>(i);
-					                      for (int j = 0; j < i; j++) {
-						                      list.add("i" + j);
-					                      }
-					                      return list;
-				                      })
-				                      .doOnNext(ls -> println("Computed: ", ls))
-				                      .log("computation");
+				computationEmitterProcessor.asFlux()
+										   .publishOn(computation)
+				                      		.map(i -> {
+												  final List<String> list = new ArrayList<>(i);
+												  for (int j = 0; j < i; j++) {
+													  list.add("i" + j);
+												  }
+												  return list;
+											})
+											.doOnNext(ls -> println("Computed: ", ls))
+											.log("computation");
 
-		final EmitterProcessor<Integer> persistenceEmitterProcessor = EmitterProcessor.create(false);
+		final Sinks.Many<Integer> persistenceEmitterProcessor = Sinks.unsafe()
+																	 .many()
+																	 .multicast()
+																	 .onBackpressureBuffer(Queues.SMALL_BUFFER_SIZE, false);
 
 		final Flux<List<String>> persistenceStream =
-				persistenceEmitterProcessor.publishOn(persistence)
-				                      .doOnNext(i -> println("Persisted: ", i))
-				                      .map(i -> Collections.singletonList("done" + i))
-				                      .log("persistence");
+				persistenceEmitterProcessor.asFlux()
+										   .publishOn(persistence)
+										   .doOnNext(i -> println("Persisted: ", i))
+										   .map(i -> Collections.singletonList("done" + i))
+										   .log("persistence");
 
-		Flux<Integer> forkStream = forkEmitterProcessor.publishOn(forkJoin)
-		                                             .log("fork");
+		Flux<Integer> forkStream = forkEmitterProcessor.asFlux()
+													   .publishOn(forkJoin)
+													   .log("fork");
 
-		forkStream.subscribe(computationEmitterProcessor);
-		forkStream.subscribe(persistenceEmitterProcessor);
+		//from(sink) calls below should return same instance since both processor and standalone sink
+		forkStream.subscribe(v -> computationEmitterProcessor.emitNext(v, FAIL_FAST),
+				e -> computationEmitterProcessor.emitError(e, FAIL_FAST),
+				() -> computationEmitterProcessor.emitComplete(FAIL_FAST));
+		forkStream.subscribe(v -> persistenceEmitterProcessor.emitNext(v, FAIL_FAST),
+				e -> persistenceEmitterProcessor.emitError(e, FAIL_FAST),
+				() -> persistenceEmitterProcessor.emitComplete(FAIL_FAST));
 
 		final Flux<List<String>> joinStream = Flux.zip(computationStream, persistenceStream, (a, b) -> Arrays.asList(a, b))
 		                                                .publishOn(forkJoin)
@@ -1386,60 +1429,80 @@ public class FluxTests extends AbstractReactorTest {
 
 		final Semaphore doneSemaphore = new Semaphore(0);
 
-		final MonoProcessor<List<String>> listPromise = joinStream.flatMap(Flux::fromIterable)
+		StepVerifier.create(joinStream.flatMap(Flux::fromIterable)
 		                                                 .log("resultStream")
 		                                                 .collectList()
-		                                                 .doOnTerminate(doneSemaphore::release)
-		                                                 .toProcessor();
-		listPromise.subscribe();
-
-		forkEmitterProcessor.onNext(1);
-		forkEmitterProcessor.onNext(2);
-		forkEmitterProcessor.onNext(3);
-		forkEmitterProcessor.onComplete();
-
-		List<String> res = listPromise.block(Duration.ofSeconds(5));
-		assertEquals(Arrays.asList("i0", "done1", "i0", "i1", "done2", "i0", "i1", "i2", "done3"), res);
-
-		forkJoin.dispose();
-		persistence.dispose();
-		computation.dispose();
+		                                                 .doOnTerminate(doneSemaphore::release))
+					.then(() -> {
+						forkEmitterProcessor.emitNext(1, FAIL_FAST);
+						forkEmitterProcessor.emitNext(2, FAIL_FAST);
+						forkEmitterProcessor.emitNext(3, FAIL_FAST);
+						forkEmitterProcessor.emitComplete(FAIL_FAST);
+					})
+					.assertNext(res -> assertThat(res).containsExactly("i0", "done1", "i0", "i1", "done2", "i0", "i1", "i2", "done3"))
+					.verifyComplete();
 	}
 
 	@Test
 	public void testThrowWithoutOnErrorShowsUpInSchedulerHandler() {
+		TestLogger testLogger = new TestLogger();
+		LoggerUtils.enableCaptureWith(testLogger);
 		AtomicReference<String> failure = new AtomicReference<>(null);
 		AtomicBoolean handled = new AtomicBoolean(false);
 
-		Thread.setDefaultUncaughtExceptionHandler((t, e) -> failure.set("unexpected call to default" +
-				" UncaughtExceptionHandler with " + e));
-		Schedulers.onHandleError((t, e) -> handled.set(true));
-
+		Thread.setDefaultUncaughtExceptionHandler((t, e) -> failure.set(
+				"unexpected call to default" + " UncaughtExceptionHandler with " + e));
 		CountDownLatch latch = new CountDownLatch(1);
+		AtomicInteger uncompletedWork = new AtomicInteger();
+		Schedulers.onHandleError((t, e) -> handled.set(true));
+		Schedulers.onScheduleHook("test", r -> {
+			uncompletedWork.incrementAndGet();
+			return () -> {
+				try {
+					r.run();
+				} finally {
+					uncompletedWork.decrementAndGet();
+				}
+			};
+		});
+
 		try {
 			Flux.interval(Duration.ofMillis(100))
 			    .take(1)
 			    .publishOn(Schedulers.parallel())
-                .doOnTerminate(() -> latch.countDown())
+			    .doOnCancel(latch::countDown)
 			    .subscribe(i -> {
 				    System.out.println("About to throw...");
 				    throw new IllegalArgumentException();
 			    });
-			latch.await(1, TimeUnit.SECONDS);
-		} catch (Throwable e) {
+
+			assertThat(latch.await(5, TimeUnit.SECONDS)).as("Expected latch to count down before timeout", latch.await(5, TimeUnit.SECONDS)).isTrue();
+			// awaiting to all threads done
+			while (uncompletedWork.get() != 0) {
+				Thread.sleep(100);
+			}
+		}
+		catch (Throwable e) {
 			fail(e.toString());
-		} finally {
+		}
+		finally {
+			LoggerUtils.disableCapture();
 			Thread.setDefaultUncaughtExceptionHandler(null);
 			Schedulers.resetOnHandleError();
+			Schedulers.resetOnScheduleHook("test");
 		}
-		assertThat(handled).as("Uncaught error handler").isTrue();
-		if (failure.get() != null) {
-			fail(failure.get());
-		}
+		assertThat(handled).as("Uncaught error handler")
+		                   .isFalse();
+		assertThat(failure).as("Uncaught error handler")
+		                   .hasValue(null);
+		assertThat(testLogger.getErrContent())
+		          .contains("Operator called default onErrorDropped")
+		          .contains(
+				          "reactor.core.Exceptions$ErrorCallbackNotImplemented: java.lang.IllegalArgumentException");
 	}
 
 	@Test
-	@Ignore
+	@Disabled
 	public void splitBugEventuallyHappens() throws Exception {
 		int successCount = 0;
 		try {
@@ -1467,7 +1530,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		Flux.from(source);
-		Assertions.assertThat(wrappedCount).hasValue(0);
+		assertThat(wrappedCount).hasValue(0);
 	}
 
 	@Test
@@ -1482,7 +1545,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		Flux.from(source);
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
@@ -1497,7 +1560,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		Flux.from(source);
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
@@ -1512,7 +1575,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		Flux.from(source);
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
@@ -1527,7 +1590,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		Flux.from(source);
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
@@ -1544,7 +1607,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		Flux.from(source);
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
@@ -1559,7 +1622,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		Flux.from(publisher);
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
@@ -1574,7 +1637,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		source.next();
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
@@ -1589,7 +1652,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		source.next();
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
@@ -1604,13 +1667,13 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		source.next();
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
 	public void fluxNextCallableCallsAssemblyHook() {
 		Flux<Integer> source = Mono.fromCallable(() -> 1).flux();
-		Assertions.assertThat(source) //smoke test that we go into the right case
+		assertThat(source) //smoke test that we go into the right case
 		          .isInstanceOf(Callable.class)
 		          .isNotInstanceOf(Mono.class)
 		          .isNotInstanceOf(Fuseable.ScalarCallable.class);
@@ -1623,7 +1686,7 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		source.next();
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
 
 	@Test
@@ -1638,10 +1701,8 @@ public class FluxTests extends AbstractReactorTest {
 		});
 
 		source.next();
-		Assertions.assertThat(wrappedCount).hasValue(1);
+		assertThat(wrappedCount).hasValue(1);
 	}
-
-	private static final long TIMEOUT = 10_000;
 
 	// Setting it to 1 doesn't help.
 	private static final int BACKLOG = 1024;

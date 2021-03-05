@@ -20,8 +20,10 @@ import java.io.Serializable;
 import java.util.Objects;
 
 import org.reactivestreams.Subscription;
+
 import reactor.util.annotation.Nullable;
 import reactor.util.context.Context;
+import reactor.util.context.ContextView;
 
 /**
  * The common implementation of a {@link Signal} (serializable and immutable).
@@ -36,7 +38,7 @@ final class ImmutableSignal<T> implements Signal<T>, Serializable {
 
 	private static final long serialVersionUID = -2004454746525418508L;
 
-	private final transient Context context;
+	private final transient ContextView contextView;
 
 	private final SignalType type;
 	private final Throwable  throwable;
@@ -45,8 +47,8 @@ final class ImmutableSignal<T> implements Signal<T>, Serializable {
 
 	private transient final Subscription subscription;
 
-	ImmutableSignal(Context context, SignalType type, @Nullable T value, @Nullable Throwable e, @Nullable Subscription subscription) {
-		this.context = context;
+	ImmutableSignal(ContextView contextView, SignalType type, @Nullable T value, @Nullable Throwable e, @Nullable Subscription subscription) {
+		this.contextView = contextView;
 		this.value = value;
 		this.subscription = subscription;
 		this.throwable = e;
@@ -77,8 +79,8 @@ final class ImmutableSignal<T> implements Signal<T>, Serializable {
 	}
 
 	@Override
-	public Context getContext() {
-		return context;
+	public ContextView getContextView() {
+		return contextView;
 	}
 
 	@Override
@@ -144,10 +146,16 @@ final class ImmutableSignal<T> implements Signal<T>, Serializable {
 		}
 	}
 
-	/**
-	 * @deprecated as Signal is now associated with {@link Context}, prefer using per-subscription instances.
-	 */
-	@Deprecated
-	static final Signal<Void> ON_COMPLETE =
+	private static final Signal<?> ON_COMPLETE =
 			new ImmutableSignal<>(Context.empty(), SignalType.ON_COMPLETE, null, null, null);
+
+	/**
+	 * @return a singleton signal to signify onComplete.
+	 * As Signal is now associated with {@link Context}, prefer using per-subscription instances.
+	 * This instance is used when context doesn't matter.
+	 */
+	@SuppressWarnings("unchecked")
+	static <U> Signal<U> onComplete() {
+		return (Signal<U>) ON_COMPLETE;
+	}
 }

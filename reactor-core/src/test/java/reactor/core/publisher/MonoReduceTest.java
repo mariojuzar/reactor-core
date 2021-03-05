@@ -21,9 +21,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.junit.Assert;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,7 +35,7 @@ import reactor.util.context.Context;
 
 import static java.lang.Thread.sleep;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class MonoReduceTest extends ReduceOperatorTest<String, String>{
 
@@ -138,8 +136,7 @@ public class MonoReduceTest extends ReduceOperatorTest<String, String>{
 
 		ts.assertNoValues()
 		  .assertError(RuntimeException.class)
-		  .assertErrorWith(e -> Assert.assertTrue(e.getMessage()
-		                                           .contains("forced failure")))
+		  .assertErrorWith(e -> assertThat(e).hasMessageContaining("forced failure"))
 		  .assertNotComplete();
 	}
 
@@ -154,10 +151,9 @@ public class MonoReduceTest extends ReduceOperatorTest<String, String>{
 		    .subscribe(ts);
 
 		ts.assertNoValues()
-		  .assertError(RuntimeException.class)
-		  .assertErrorWith(e -> Assert.assertTrue(e.getMessage()
-		                                           .contains("forced failure")))
-		  .assertNotComplete();
+				.assertError(RuntimeException.class)
+				.assertErrorWith(e -> assertThat(e).hasMessageContaining("forced failure"))
+				.assertNotComplete();
 	}
 
 	@Test
@@ -181,7 +177,7 @@ public class MonoReduceTest extends ReduceOperatorTest<String, String>{
 		Flux.range(0, 10).flatMap(x ->
 				Flux.range(0, 2)
 				    .map(y -> blockingOp(x, y))
-				    .subscribeOn(Schedulers.elastic())
+				    .subscribeOn(Schedulers.boundedElastic())
 				    .reduce((l, r) -> l + "_" + r)
 //				    .log("reduced."+x)
 				    .doOnSuccess(s -> {
@@ -191,8 +187,8 @@ public class MonoReduceTest extends ReduceOperatorTest<String, String>{
 				    })
 		).blockLast();
 
-		assertEquals(10, count.get());
-		assertEquals(0, countNulls.get());
+		assertThat(count).hasValue(10);
+		assertThat(countNulls).hasValue(0);
 	}
 
 	private static String blockingOp(Integer x, Integer y) {
@@ -305,6 +301,13 @@ public class MonoReduceTest extends ReduceOperatorTest<String, String>{
 	}
 
 	@Test
+	public void scanOperator(){
+	    MonoReduce<Integer> test = new MonoReduce<>(Flux.just(1, 2, 3), (a, b) -> a + b);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
 	public void scanSubscriber() {
 		CoreSubscriber<String> actual = new LambdaMonoSubscriber<>(null, e -> {}, null, null);
 		MonoReduce.ReduceSubscriber<String> test = new MonoReduce.ReduceSubscriber<>(actual, (s1, s2) -> s1 + s2);
@@ -315,6 +318,7 @@ public class MonoReduceTest extends ReduceOperatorTest<String, String>{
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.onError(new IllegalStateException("boom"));

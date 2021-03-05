@@ -21,8 +21,8 @@ import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
@@ -103,7 +103,7 @@ public class FluxDelaySequenceTest {
 		            .verifyComplete();
 	}
 
-	@Ignore("delayElements test for local comparison run")
+	@Disabled("delayElements test for local comparison run")
 	@Test
 	public void delayElements() {
 		Flux<Tuple2<Long, Long>> test = Flux.interval(Duration.ofMillis(50))
@@ -177,18 +177,7 @@ public class FluxDelaySequenceTest {
 	}
 
 	@Test
-	public void longDelayInMillis() {
-		Duration longDelay = Duration.ofMinutes(1);
-		long expected = longDelay.toMillis();
-
-		DelaySubscriber<String> subscriber = new DelaySubscriber<>(null, longDelay, null);
-
-		assertThat(subscriber.delay).isEqualTo(expected);
-		assertThat(subscriber.timeUnit).isSameAs(TimeUnit.MILLISECONDS);
-	}
-
-	@Test
-	public void smallDelayInNanos() {
+	public void allDelayInNanos() {
 		Duration longDelay = Duration.ofMillis(59_999);
 		long expected = longDelay.toNanos();
 
@@ -267,6 +256,7 @@ public class FluxDelaySequenceTest {
 		FluxDelaySequence<String> test = new FluxDelaySequence<>(Flux.empty(), Duration.ofSeconds(1), Schedulers.immediate());
 
 		assertThat(test.scan(Scannable.Attr.RUN_ON)).isSameAs(Schedulers.immediate());
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
 	}
 
 	@Test
@@ -287,6 +277,7 @@ public class FluxDelaySequenceTest {
 				.satisfies(ser -> assertThat(ser.actual).isSameAs(actual));
 
 		assertThat(test.scan(Scannable.Attr.RUN_ON)).isEqualTo(worker);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();

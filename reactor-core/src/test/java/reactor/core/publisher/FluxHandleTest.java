@@ -16,6 +16,7 @@
 
 package reactor.core.publisher;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -24,8 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
@@ -39,14 +39,14 @@ import reactor.test.publisher.TestPublisher;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static reactor.core.Fuseable.ASYNC;
-import static reactor.core.Fuseable.SYNC;
+import static org.assertj.core.api.Assertions.assertThatNullPointerException;
+import static reactor.core.Fuseable.*;
 
 public class FluxHandleTest extends FluxOperatorTest<String, String> {
 
 	@Override
 	protected Scenario<String, String> defaultScenarioOptions(Scenario<String, String> defaultOptions) {
-		return defaultOptions.fusionMode(Fuseable.ASYNC);
+		return defaultOptions.fusionMode(ASYNC);
 	}
 
 	@Override
@@ -270,8 +270,8 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 		  .assertError(IllegalStateException.class)
 		  .assertNotComplete();
 
-		Assert.assertSame(throwableInOnOperatorError.get(), exception);
-		Assert.assertSame(dataInOnOperatorError.get(), data);
+		assertThat(exception).isSameAs(throwableInOnOperatorError.get());
+		assertThat(data).isSameAs(dataInOnOperatorError.get());
 	}
 
 	@Test
@@ -301,8 +301,8 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 		  .assertError(IllegalStateException.class)
 		  .assertNotComplete();
 
-		Assert.assertSame(throwableInOnOperatorError.get(), exception);
-		Assert.assertSame(dataInOnOperatorError.get(), data);
+		assertThat(exception).isSameAs(throwableInOnOperatorError.get());
+		assertThat(data).isSameAs(dataInOnOperatorError.get());
 	}
 
 	@Test
@@ -371,7 +371,7 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 		StepVerifier.create(Flux.just("test")
 		                        .as(this::passThrough)
 		                        .filter(t -> true))
-		            .expectFusion(Fuseable.SYNC)
+		            .expectFusion(SYNC)
 		            .expectNext("test")
 		            .verifyComplete();
 	}
@@ -382,8 +382,26 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 		                        .handle((data, s) -> {
 		                        })
 		                        .filter(t -> true))
-		            .expectFusion(Fuseable.SYNC)
+		            .expectFusion(SYNC)
 		            .verifyComplete();
+	}
+
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxHandle<Integer, ?> test = new FluxHandle<>(parent, (t, s) -> { });
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
+	public void scanFuseableOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxHandleFuseable<Integer, ?> test = new FluxHandleFuseable<>(parent, (t, s) -> { });
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
     @Test
@@ -395,6 +413,7 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.error = new IllegalStateException("boom");
@@ -414,6 +433,7 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(subscriber);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.error = new IllegalStateException("boom");
@@ -432,6 +452,7 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.error = new IllegalStateException("boom");
@@ -451,6 +472,7 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(subscriber);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.error = new IllegalStateException("boom");
@@ -467,7 +489,7 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 		                                               .get(AtomicInteger.class)
 		                                               .incrementAndGet()))
 		                        .repeat(9)
-		                        .subscriberContext(ctx -> ctx.put(AtomicInteger.class,
+		                        .contextWrite(ctx -> ctx.put(AtomicInteger.class,
 				                        new AtomicInteger())))
 		            .expectNext(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 		            .verifyComplete();
@@ -481,7 +503,7 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 		                                               .get(AtomicInteger.class)
 		                                               .incrementAndGet()))
 		                        .repeat(9)
-		                        .subscriberContext(ctx -> ctx.put(AtomicInteger.class,
+		                        .contextWrite(ctx -> ctx.put(AtomicInteger.class,
 				                        new AtomicInteger())))
 		            .expectNext(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 		            .verifyComplete();
@@ -495,7 +517,7 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 		                                               .incrementAndGet()))
 		                        .filter(d -> true)
 		                        .repeat(9)
-		                        .subscriberContext(ctx -> ctx.put(AtomicInteger.class,
+		                        .contextWrite(ctx -> ctx.put(AtomicInteger.class,
 				                        new AtomicInteger())))
 		            .expectNext(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 		            .verifyComplete();
@@ -508,7 +530,7 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 		                                               .incrementAndGet()))
 		                        .filter(d -> true)
 		                        .repeat(9)
-		                        .subscriberContext(ctx -> ctx.put(AtomicInteger.class,
+		                        .contextWrite(ctx -> ctx.put(AtomicInteger.class,
 				                        new AtomicInteger())))
 		            .expectNext(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 		            .verifyComplete();
@@ -665,6 +687,18 @@ public class FluxHandleTest extends FluxOperatorTest<String, String> {
 		                                                    .hasMessage("Cannot emit after a complete or error"));
 	}
 
+    @Test
+    public void runtimeExceptionFused() {
+        // Check issue that for fuseable and Exception thrown inside handle it did not propagate signal -> hanging flux
+        //  and throws IllegalStateException: Timeout on blocking read
+        assertThatNullPointerException().isThrownBy(() -> {
+            Flux.range(0, 10)
+                .handle((v, sink) -> {
+                    throw new NullPointerException("boom");
+                })
+                .blockLast(Duration.ofSeconds(1));
+        }).withMessage("boom");
+    }
 
 	@Test
 	public void errorAfterCompleteFused() {

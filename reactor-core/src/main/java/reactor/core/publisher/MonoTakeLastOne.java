@@ -48,6 +48,12 @@ final class MonoTakeLastOne<T> extends MonoFromFluxOperator<T, T>
 		return new TakeLastOneSubscriber<>(actual, defaultValue, true);
 	}
 
+	@Override
+	public Object scanUnsafe(Attr key) {
+    	if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
+	}
+
 	static final class TakeLastOneSubscriber<T>
 			extends Operators.MonoSubscriber<T, T>  {
 
@@ -79,20 +85,21 @@ final class MonoTakeLastOne<T> extends MonoFromFluxOperator<T, T>
 		@Nullable
 		public Object scanUnsafe(Attr key) {
 			if (key == Attr.PARENT) return s;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 			return super.scanUnsafe(key);
 		}
 
 		@Override
 		public void onNext(T t) {
-			T old = value;
-			value = t;
+			T old = this.value;
+			setValue(t);
 			Operators.onDiscard(old, actual.currentContext()); //FIXME cache context
 		}
 
 		@Override
 		public void onComplete() {
-			T v = value;
+			T v = this.value;
 			if (v == null) {
 				if (mustEmit) {
 					if(defaultValue != null){
@@ -116,11 +123,6 @@ final class MonoTakeLastOne<T> extends MonoFromFluxOperator<T, T>
 		public void cancel() {
 			super.cancel();
 			s.cancel();
-		}
-
-		@Override
-		public void setValue(T value) {
-			this.value = value;
 		}
 	}
 }

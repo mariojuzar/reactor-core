@@ -21,9 +21,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
+
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
@@ -208,8 +209,8 @@ public class MonoFilterWhenTest {
 		    .filterWhen(v -> Mono.just(true).hide())
 		    .subscribe(bs);
 
-		assertThat(onNextCount.get()).isEqualTo(1);
-		assertThat(endSignal.get()).isEqualTo(SignalType.CANCEL);
+		assertThat(onNextCount).hasValue(1);
+		assertThat(endSignal).hasValue(SignalType.CANCEL);
 	}
 
 	@Test
@@ -240,20 +241,20 @@ public class MonoFilterWhenTest {
 		        .filterWhen(v -> Mono.just(true).hide())
 		        .subscribe(bs);
 
-		assertThat(onNextCount.get()).isEqualTo(1);
-		assertThat(endSignal.get()).isEqualTo(SignalType.CANCEL);
+		assertThat(onNextCount).hasValue(1);
+		assertThat(endSignal).hasValue(SignalType.CANCEL);
 	}
 
 
 	@Test
 	public void cancel() {
-		final EmitterProcessor<Boolean> pp = EmitterProcessor.create();
+		final Sinks.Many<Boolean> pp = Sinks.many().multicast().onBackpressureBuffer();
 
 		StepVerifier.create(Mono.just(1)
-		                        .filterWhen(v -> pp))
+		                        .filterWhen(v -> pp.asFlux()))
 		            .thenCancel();
 
-		assertThat(pp.hasDownstreams()).isFalse();
+		assertThat(pp.currentSubscriberCount()).as("pp has subscriber").isZero();
 	}
 
 	@Test
@@ -266,7 +267,7 @@ public class MonoFilterWhenTest {
 		            .expectNext(1)
 		            .verifyComplete();
 
-		assertThat(cancelCount.get()).isEqualTo(1);
+		assertThat(cancelCount).hasValue(1);
 	}
 
 	@Test
@@ -286,7 +287,7 @@ public class MonoFilterWhenTest {
 		            .expectNext(3)
 		            .verifyComplete();
 
-		assertThat(cancelCount.get()).isEqualTo(0);
+		assertThat(cancelCount).hasValue(0);
 	}
 
 	@Test
@@ -316,6 +317,13 @@ public class MonoFilterWhenTest {
 	}
 
 	@Test
+	public void scanOperator(){
+	    MonoFilterWhen<Integer> test = new MonoFilterWhen<>(Mono.just(1), null);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
 	public void scanSubscriber() {
 		CoreSubscriber<String> actual = new LambdaMonoSubscriber<>(null, e -> {}, null, null);
 		MonoFilterWhen.MonoFilterWhenMain<String>
@@ -328,6 +336,7 @@ public class MonoFilterWhenTest {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		//TERMINATED IS COVERED BY TEST ABOVE
 
@@ -349,10 +358,10 @@ public class MonoFilterWhenTest {
 
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(main);
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(innerSubscription);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(Integer.MAX_VALUE);
 		assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(1L);
-
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.onError(new IllegalStateException("boom"));

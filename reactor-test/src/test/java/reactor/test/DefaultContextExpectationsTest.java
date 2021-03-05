@@ -24,10 +24,12 @@ import java.util.function.Function;
 
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.ThrowableAssertAlternative;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Hooks;
 import reactor.test.DefaultStepVerifierBuilder.DefaultContextExpectations;
 import reactor.test.StepVerifier.ContextExpectations;
 import reactor.test.StepVerifier.Step;
@@ -65,21 +67,26 @@ public class DefaultContextExpectationsTest {
 				.isThrownBy(() -> assertContextExpectation(sourceTransformer, expectations));
 	}
 
+	@AfterEach
+	void tearDown() {
+		Hooks.resetOnOperatorDebug();
+	}
+
 	@Test
 	public void contextAccessibleLastInChain() {
-		assertContextExpectation(s -> s.take(3).subscriberContext(Context.of("a", "b")),
+		assertContextExpectation(s -> s.take(3).contextWrite(Context.of("a", "b")),
 				e -> e, 3);
 	}
 
 	@Test
 	public void contextAccessibleFirstInChain() {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("a", "b")).take(3),
+		assertContextExpectation(s -> s.contextWrite(Context.of("a", "b")).take(3),
 				e -> e, 3);
 	}
 
 	@Test
 	public void contextAccessibleSoloInChain() {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("a", "b")), e -> e);
+		assertContextExpectation(s -> s.contextWrite(Context.of("a", "b")), e -> e);
 	}
 
 	@Test
@@ -106,69 +113,81 @@ public class DefaultContextExpectationsTest {
 
 	@Test
 	public void hasKey() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.hasKey("foo"));
 	}
 	@Test
 	public void notHasKey() throws Exception {
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.hasKey("bar"))
-				.withMessage("Key bar not found in Context Context1{foo=bar}");
+				.withMessageStartingWith("" +
+						"Key bar not found\n" +
+						"Context: Context1{foo=bar}"
+				);
 	}
 
 	@Test
 	public void hasSize() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.hasSize(2));
 	}
 
 	@Test
 	public void notHasSize() throws Exception {
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz"))
-		                                    .subscriberContext(Context.of("fails", true)),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz"))
+		                                    .contextWrite(Context.of("fails", true)),
 				e -> e.hasSize(2))
-				.withMessageStartingWith("Expected Context of size 2, got 3 for Context Context3{");
+				.withMessageStartingWith("" +
+						"Expected Context of size 2, got 3\n" +
+						"Context: Context3{fails=true, foo=bar, foobar=baz}"
+				);
 	}
 
 	@Test
 	public void contains() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.contains("foo", "bar"));
 	}
 
 	@Test
 	public void notContainsKey() throws Exception {
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.contains("fooz", "bar"))
-				.withMessage("Expected value bar for key fooz, key not present in Context " +
-						"Context2{foo=bar, foobar=baz}");
+				.withMessageStartingWith("" +
+						"Expected value bar for key fooz, key not present\n" +
+						"Context: Context2{foo=bar, foobar=baz}"
+				);
 	}
 
 	@Test
 	public void notContainsValue() throws Exception {
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.contains("foo", "baz"))
-				.withMessage("Expected value baz for key foo, got bar in Context " +
-						"Context2{foo=bar, foobar=baz}");
+				.withMessageStartingWith("" +
+						"Expected value baz for key foo, got bar\n" +
+						"Context: Context2{foo=bar, foobar=baz}"
+				);
 	}
 
 	@Test
 	public void containsAllOfContext() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.containsAllOf(Context.of("foo", "bar")));
 	}
 
 	@Test
 	public void notContainsAllOfContext() throws Exception {
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.containsAllOf(Context.of("foo", "bar", "other", "stuff")))
-				.withMessage("Expected Context Context2{foo=bar, foobar=baz} to contain all " +
-						"of Context2{foo=bar, other=stuff}");
+				.withMessageStartingWith("" +
+						"Expected Context to contain all of Context2{foo=bar, other=stuff}\n" +
+						"Context: Context2{foo=bar, foobar=baz}"
+				);
 	}
 
 	@Test
 	public void containsAllOfMap() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.containsAllOf(Collections.singletonMap("foo", "bar")));
 	}
 
@@ -178,15 +197,17 @@ public class DefaultContextExpectationsTest {
 		expected.put("foo", "bar");
 		expected.put("other", "stuff");
 
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.containsAllOf(expected))
-				.withMessage("Expected Context Context2{foo=bar, foobar=baz} to contain all " +
-						"of {other=stuff, foo=bar}");
+				.withMessageStartingWith("" +
+						"Expected Context to contain all of {other=stuff, foo=bar}\n" +
+						"Context: Context2{foo=bar, foobar=baz}"
+				);
 	}
 
 	@Test
 	public void containsOnlyOfContext() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.containsOnly(Context.of("foo", "bar")));
 	}
 
@@ -194,25 +215,29 @@ public class DefaultContextExpectationsTest {
 	public void notContainsOnlyOfContextSize() throws Exception {
 		Context expected = Context.of("foo", "bar", "other", "stuff");
 
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.containsOnly(expected))
-				.withMessage("Expected Context Context1{foo=bar} to contain same values as " +
-						"Context2{foo=bar, other=stuff}, but they differ in size");
+				.withMessageStartingWith("" +
+						"Expected Context to contain same values as Context2{foo=bar, other=stuff}, but they differ in size\n" +
+						"Context: Context1{foo=bar}"
+				);
 	}
 
 	@Test
 	public void notContainsOnlyOfContextContent() throws Exception {
 		Context expected = Context.of("foo", "bar", "other", "stuff");
 
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.containsOnly(expected))
-				.withMessage("Expected Context Context2{foo=bar, foobar=baz} to contain " +
-						"same values as Context2{foo=bar, other=stuff}, but they differ in content");
+				.withMessageStartingWith("" +
+						"Expected Context to contain same values as Context2{foo=bar, other=stuff}, but they differ in content\n" +
+						"Context: Context2{foo=bar, foobar=baz}"
+				);
 	}
 
 	@Test
 	public void containsOnlyOfMap() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.containsOnly(Collections.singletonMap("foo", "bar")));
 	}
 
@@ -222,10 +247,12 @@ public class DefaultContextExpectationsTest {
 		expected.put("foo", "bar");
 		expected.put("other", "stuff");
 
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.containsOnly(expected))
-				.withMessage("Expected Context Context1{foo=bar} to contain same values as " +
-						"{other=stuff, foo=bar}, but they differ in size");
+				.withMessageStartingWith("" +
+						"Expected Context to contain same values as {other=stuff, foo=bar}, but they differ in size\n" +
+						"Context: Context1{foo=bar}"
+				);
 	}
 
 	@Test
@@ -234,55 +261,63 @@ public class DefaultContextExpectationsTest {
 		expected.put("foo", "bar");
 		expected.put("other", "stuff");
 
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar", "foobar", "baz")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar", "foobar", "baz")),
 				e -> e.containsOnly(expected))
-				.withMessage("Expected Context Context2{foo=bar, foobar=baz} to contain " +
-						"same values as {other=stuff, foo=bar}, but they differ in content");
+				.withMessageStartingWith("" +
+						"Expected Context to contain same values as {other=stuff, foo=bar}, but they differ in content\n" +
+						"Context: Context2{foo=bar, foobar=baz}"
+				);
 	}
 
 	@Test
 	public void assertThat() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.assertThat(c -> Assertions.assertThat(c).isNotNull()));
 	}
 
 	@Test
 	public void notAssertThat() throws Exception {
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.assertThat(c -> { throw new AssertionError("boom"); }))
 				.withMessage("boom");
 	}
 
 	@Test
 	public void matches() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.matches(Objects::nonNull));
 	}
 
 	@Test
 	public void notMatches() throws Exception {
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.matches(Objects::isNull))
-				.withMessage("Context Context1{foo=bar} doesn't match predicate");
+				.withMessageStartingWith("" +
+						"Context doesn't match predicate\n" +
+						"Context: Context1{foo=bar}"
+				);
 	}
 
 	@Test
 	public void matchesWithDescription() throws Exception {
-		assertContextExpectation(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectation(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.matches(Objects::nonNull, "desc"));
 	}
 
 	@Test
 	public void notMatchesWithDescription() throws Exception {
-		assertContextExpectationFails(s -> s.subscriberContext(Context.of("foo", "bar")),
+		assertContextExpectationFails(s -> s.contextWrite(Context.of("foo", "bar")),
 				e -> e.matches(Objects::isNull, "desc"))
-				.withMessage("Context Context1{foo=bar} doesn't match predicate desc");
+				.withMessageStartingWith("" +
+						"Context doesn't match predicate desc\n" +
+						"Context: Context1{foo=bar}"
+				);
 	}
 
 	@Test
 	public void notMatchesWithDescriptionAndScenarioName() {
 		Flux<Integer> source = Flux.range(1, 10)
-		                           .subscriberContext(Context.of("foo", "bar"));
+		                           .contextWrite(Context.of("foo", "bar"));
 
 		Step<Integer> step = StepVerifier.create(source);
 		final DefaultContextExpectations<Integer> base = new DefaultContextExpectations<>(step, new MessageFormatter("scenario", null, null));
@@ -292,7 +327,38 @@ public class DefaultContextExpectationsTest {
 						base.matches(Objects::isNull, "someDescription")
 						    .then()
 						    .expectNextCount(10)::verifyComplete)
-				.withMessage("[scenario] Context Context1{foo=bar} doesn't match predicate someDescription");
+				.withMessageStartingWith("" +
+						"[scenario] Context doesn't match predicate someDescription\n" +
+						"Context: Context1{foo=bar}"
+				);
+	}
+
+	@Test
+	public void capturedOperator() {
+		assertContextExpectationFails(
+				s -> s.doOnEach(__ -> {}),
+				e -> e.hasKey("foo")
+		).withMessageEndingWith("Captured at: range");
+	}
+
+	@Test
+	public void capturedOperatorWithDebug() {
+		Hooks.onOperatorDebug();
+
+		assertContextExpectationFails(
+				s -> s.doOnEach(__ -> {}),
+				e -> e.hasKey("foo")
+		).withMessageContaining("Captured at: Flux.range ⇢ at reactor.test.DefaultContextExpectationsTest.assertContextExpectation(DefaultContextExpectationsTest.java:");
+	}
+
+	@Test
+	public void capturedOperatorWithDebugAndConditionalSubscriber() {
+		Hooks.onOperatorDebug();
+
+		assertContextExpectationFails(
+				s -> s.contextWrite(Context.empty()),
+				e -> e.hasKey("foo")
+		).withMessageContaining("Captured at: Flux.range ⇢ at reactor.test.DefaultContextExpectationsTest.assertContextExpectation(DefaultContextExpectationsTest.java:");
 	}
 
 }

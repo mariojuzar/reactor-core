@@ -18,7 +18,7 @@ package reactor.test.publisher;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
@@ -110,7 +110,7 @@ public class DefaultTestPublisherTests {
 	             .emit("A", "B", "C")
 	             .error(new IllegalStateException("boom"));
 
-		assertThat(count.get()).isEqualTo(1);
+		assertThat(count).hasValue(1);
 	}
 
 	private Subscriber<String> countingSubscriber(AtomicLong count) {
@@ -149,7 +149,7 @@ public class DefaultTestPublisherTests {
 
 		publisher.emit("A", "B", "C");
 
-		assertThat(count.get()).isEqualTo(3);
+		assertThat(count).hasValue(3);
 		publisher.assertCancelled();
 	}
 
@@ -166,7 +166,7 @@ public class DefaultTestPublisherTests {
 
 		publisher.emit("A", "B", "C");
 
-		assertThat(count.get()).isEqualTo(3);
+		assertThat(count).hasValue(3);
 		publisher.assertCancelled();
 	}
 
@@ -184,7 +184,7 @@ public class DefaultTestPublisherTests {
 
 		publisher.emit("A", "B", "C");
 
-		assertThat(count.get()).isEqualTo(3);
+		assertThat(count).hasValue(3);
 		publisher.assertCancelled();
 	}
 
@@ -209,7 +209,7 @@ public class DefaultTestPublisherTests {
 		publisher.emit("A", "B", "C");
 
 		publisher.assertCancelled();
-		assertThat(emitCount.get()).isEqualTo(3);
+		assertThat(emitCount).hasValue(3);
 	}
 
 	@Test
@@ -378,7 +378,7 @@ public class DefaultTestPublisherTests {
 		TestPublisher<String> publisher = TestPublisher.create();
 
 		assertThatExceptionOfType(NullPointerException.class)
-				.isThrownBy(() -> publisher.next(null, null)) //this causes a compiler warning, on purpose
+				.isThrownBy(() -> publisher.next(null, (String[]) null)) //end users forgetting to cast would see compiler warning as well
 				.withMessage("rest array is null, please cast to T if null T required");
 	}
 
@@ -387,7 +387,7 @@ public class DefaultTestPublisherTests {
 		TestPublisher<String> publisher = TestPublisher.create();
 
 		assertThatExceptionOfType(NullPointerException.class)
-				.isThrownBy(() -> publisher.emit(null)) //this causes a compiler warning, on purpose
+				.isThrownBy(() -> publisher.emit((String[]) null)) //end users forgetting to cast would see compiler warning as well
 				.withMessage("values array is null, please cast to T if null T required");
 	}
 

@@ -26,8 +26,8 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Stream;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
@@ -37,6 +37,7 @@ import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.context.Context;
+import reactor.util.context.ContextView;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
 
@@ -119,7 +120,7 @@ public class MonoDoOnEachTest {
 		    })
 		    .subscribe(ts);
 
-		assertThat(onNext.get()).isEqualTo(1);
+		assertThat(onNext).hasValue(1);
 		assertThat(onError.get()).isNull();
 		assertThat(onComplete.get()).isTrue();
 	}
@@ -249,11 +250,11 @@ public class MonoDoOnEachTest {
 
 	@Test
 	public void nextComplete() {
-		List<Tuple2<Signal, Context>> signalsAndContext = new ArrayList<>();
+		List<Tuple2<Signal, ContextView>> signalsAndContext = new ArrayList<>();
 		Mono.just(1)
 		    .hide()
-		    .doOnEach(s -> signalsAndContext.add(Tuples.of(s, s.getContext())))
-		    .subscriberContext(Context.of("foo", "bar"))
+		    .doOnEach(s -> signalsAndContext.add(Tuples.of(s, s.getContextView())))
+		    .contextWrite(Context.of("foo", "bar"))
 		    .subscribe();
 
 		assertThat(signalsAndContext)
@@ -271,11 +272,11 @@ public class MonoDoOnEachTest {
 
 	@Test
 	public void nextError() {
-		List<Tuple2<Signal, Context>> signalsAndContext = new ArrayList<>();
+		List<Tuple2<Signal, ContextView>> signalsAndContext = new ArrayList<>();
 		Mono.just(0)
 		    .map(i -> 10 / i)
-		    .doOnEach(s -> signalsAndContext.add(Tuples.of(s,s.getContext())))
-		    .subscriberContext(Context.of("foo", "bar"))
+		    .doOnEach(s -> signalsAndContext.add(Tuples.of(s,s.getContextView())))
+		    .contextWrite(Context.of("foo", "bar"))
 		    .subscribe();
 
 		assertThat(signalsAndContext)
@@ -339,7 +340,7 @@ public class MonoDoOnEachTest {
 
 	//see https://github.com/reactor/reactor-core/issues/1547
 	@Test
-	@Ignore("Mono doesn't trigger tryOnNext")
+	@Disabled("Mono doesn't trigger tryOnNext")
 	public void triggersCompleteSignalInMonoOnNextConditional() {
 		CopyOnWriteArrayList<String> eventOrder = new CopyOnWriteArrayList<>();
 
@@ -366,7 +367,7 @@ public class MonoDoOnEachTest {
 
 	//see https://github.com/reactor/reactor-core/issues/1547
 	@Test
-	@Ignore("Mono doesn't trigger tryOnNext")
+	@Disabled("Mono doesn't trigger tryOnNext")
 	public void triggersCompleteSignalInMonoOnNextConditionalFused() {
 		CopyOnWriteArrayList<String> eventOrder = new CopyOnWriteArrayList<>();
 
@@ -519,4 +520,19 @@ public class MonoDoOnEachTest {
 
 		assertThat(errorHandlerCount).as("error handler invoked on top on complete").hasValue(1);
 	}
+
+	@Test
+	public void scanOperator(){
+		final MonoDoOnEach<String> test = new MonoDoOnEach<>(Mono.just("foo"), s -> { });
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
+	public void scanFuseableOperator(){
+		final MonoDoOnEachFuseable<String> test = new MonoDoOnEachFuseable<>(Mono.just("foo"), s -> { });
+
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
 }

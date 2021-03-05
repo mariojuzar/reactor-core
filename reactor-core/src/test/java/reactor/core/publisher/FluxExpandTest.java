@@ -25,7 +25,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
@@ -109,7 +110,7 @@ public class FluxExpandTest {
 
 			for (int j = 0; j <= i; j++) {
 				assertThat(list.get(j).intValue())
-						.as(tag + ", " + list)
+						.as("%s, %s", tag, list)
 						.isEqualTo(i - j);
 			}
 		}
@@ -132,7 +133,7 @@ public class FluxExpandTest {
 
 			for (int j = 0; j <= i; j++) {
 				assertThat(list.get(j).intValue())
-						.as(tag + ", " + list)
+						.as("%s, %s", tag, list)
 						.isEqualTo(i - j);
 			}
 		}
@@ -294,7 +295,8 @@ public class FluxExpandTest {
 		);
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void depthFirst() {
 		Node root = createTest();
 
@@ -318,7 +320,7 @@ public class FluxExpandTest {
 
 		StepVerifier.create(Flux.just(root)
 		                        .expandDeep(v -> Flux.fromIterable(v.children)
-		                                             .subscribeOn(Schedulers.elastic()))
+		                                             .subscribeOn(Schedulers.boundedElastic()))
 		                        .map(v -> v.name))
 		            .expectNext(
 				            "root",
@@ -332,7 +334,8 @@ public class FluxExpandTest {
 		            .verify(Duration.ofSeconds(5));
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void breadthFirst() {
 		Node root = createTest();
 
@@ -354,7 +357,7 @@ public class FluxExpandTest {
 		Node root = createTest();
 
 		StepVerifier.create(Flux.just(root)
-		                        .expand(v -> Flux.fromIterable(v.children).subscribeOn(Schedulers.elastic()))
+		                        .expand(v -> Flux.fromIterable(v.children).subscribeOn(Schedulers.boundedElastic()))
 		                        .map(v -> v.name))
 		            .expectNext(
 				            "root",
@@ -421,7 +424,7 @@ public class FluxExpandTest {
 			Runnable r1 = () -> ts.request(1);
 			Runnable r2 = ts::cancel;
 
-			RaceTestUtils.race(r1, r2, Schedulers.single());
+			RaceTestUtils.race(r1, r2);
 		}
 	}
 
@@ -440,7 +443,7 @@ public class FluxExpandTest {
 			Runnable r1 = () -> pp.next(1);
 			Runnable r2 = ts::cancel;
 
-			RaceTestUtils.race(r1, r2, Schedulers.single());
+			RaceTestUtils.race(r1, r2);
 		}
 	}
 
@@ -458,7 +461,7 @@ public class FluxExpandTest {
 			Runnable r1 = pp::complete;
 			Runnable r2 = ts::cancel;
 
-			RaceTestUtils.race(r1, r2, Schedulers.single());
+			RaceTestUtils.race(r1, r2);
 		}
 	}
 
@@ -544,6 +547,15 @@ public class FluxExpandTest {
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Node> parent = Flux.just(ROOT_A, ROOT_B);
+		FluxExpand<Node> test = new FluxExpand<>(parent, v -> Flux.fromIterable(v.children), false, 5);
+
+	    assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
 	public void scanExpandBreathSubscriber() {
 		CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null,
 				Throwable::printStackTrace, null,null);
@@ -555,6 +567,7 @@ public class FluxExpandTest {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isEqualTo(s);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isEqualTo(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		test.request(3);
 		assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(3);
@@ -581,6 +594,7 @@ public class FluxExpandTest {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(s);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(parentActual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.onComplete();

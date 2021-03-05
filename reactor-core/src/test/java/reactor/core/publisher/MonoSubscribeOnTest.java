@@ -21,9 +21,8 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.junit.Assert;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.reactivestreams.Subscription;
 
 import reactor.core.CoreSubscriber;
@@ -32,7 +31,7 @@ import reactor.core.Disposables;
 import reactor.core.Scannable;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
-import reactor.test.AutoDisposingRule;
+import reactor.test.AutoDisposingExtension;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 import reactor.test.util.RaceTestUtils;
@@ -41,9 +40,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 public class MonoSubscribeOnTest {
 
-	@Rule
-	public AutoDisposingRule afterTest = new AutoDisposingRule();
-	
+	@RegisterExtension
+	public AutoDisposingExtension afterTest = new AutoDisposingExtension();
+
 	/*@Test
 	public void constructors() {
 		ConstructorTestBuilder ctb = new ConstructorTestBuilder(FluxPublishOn.class);
@@ -194,12 +193,12 @@ public class MonoSubscribeOnTest {
 		Mono<Integer> p = Mono.fromCallable(count::incrementAndGet)
 		                      .subscribeOn(Schedulers.fromExecutorService(ForkJoinPool.commonPool()));
 
-		Assert.assertEquals(0, count.get());
+		assertThat(count).hasValue(0);
 
 		p.subscribeWith(AssertSubscriber.create())
 		 .await();
 
-		Assert.assertEquals(1, count.get());
+		assertThat(count).hasValue(1);
 	}
 
 	@Test
@@ -207,6 +206,7 @@ public class MonoSubscribeOnTest {
 		MonoSubscribeOn<String> test = new MonoSubscribeOn<>(Mono.empty(), Schedulers.immediate());
 
 		assertThat(test.scan(Scannable.Attr.RUN_ON)).isSameAs(Schedulers.immediate());
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
 	}
 
 	@Test
@@ -226,6 +226,7 @@ public class MonoSubscribeOnTest {
 			assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(3L);
 
 			assertThat(test.scan(Scannable.Attr.RUN_ON)).isSameAs(worker);
+			assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
 			assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 			assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
 
@@ -271,7 +272,7 @@ public class MonoSubscribeOnTest {
 				new MonoSubscribeOn.SubscribeOnSubscriber<>(ignoredSubscribe -> {}, null, countingWorker);
 		for (int i = 1; i <= 10_000; i++) {
 			RaceTestUtils.race(sosub::cancel, () -> sosub.onSubscribe(Operators.emptySubscription()));
-			assertThat(disposeCount).as("idle/disposed in round " + i).hasValue(i);
+			assertThat(disposeCount).as("idle/disposed in round %d", i).hasValue(i);
 
 			//reset
 			sosub.s = null;

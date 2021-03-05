@@ -19,7 +19,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 
 import reactor.core.CoreSubscriber;
@@ -30,7 +30,6 @@ import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.function.Tuple2;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.tuple;
 
 public class FluxDematerializeTest extends FluxOperatorTest<Signal<String>, String> {
 
@@ -283,6 +282,15 @@ public class FluxDematerializeTest extends FluxOperatorTest<Signal<String>, Stri
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Signal<Integer>> parent = Flux.just(Signal.next(1));
+		FluxDematerialize<Integer> test = new FluxDematerialize<>(parent);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
 	public void scanSubscriber() {
 		CoreSubscriber<String> actual = new LambdaSubscriber<>(null, e -> {}, null,
 				sub -> sub.request(100));
@@ -293,6 +301,7 @@ public class FluxDematerializeTest extends FluxOperatorTest<Signal<String>, Stri
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.ERROR)).isNull();
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();

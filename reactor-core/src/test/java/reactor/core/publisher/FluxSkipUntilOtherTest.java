@@ -21,13 +21,16 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.publisher.FluxOperatorTest;
 import reactor.test.subscriber.AssertSubscriber;
+
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class FluxSkipUntilOtherTest extends FluxOperatorTest<String, String> {
 
@@ -69,15 +72,19 @@ public class FluxSkipUntilOtherTest extends FluxOperatorTest<String, String> {
 		);
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void nullSource() {
-		new FluxSkipUntilOther<>(null, Flux.never());
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxSkipUntilOther<>(null, Flux.never());
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void nullOther() {
-		Flux.never()
-		    .skipUntilOther(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never()
+					.skipUntilOther(null);
+		});
 	}
 
 	@Test
@@ -254,6 +261,15 @@ public class FluxSkipUntilOtherTest extends FluxOperatorTest<String, String> {
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxSkipUntilOther<Integer, Integer> test = new FluxSkipUntilOther<>(parent, Flux.just(2));
+
+		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanMainSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxSkipUntilOther.SkipUntilMainSubscriber<Integer> test =
@@ -265,6 +281,7 @@ public class FluxSkipUntilOtherTest extends FluxOperatorTest<String, String> {
         SerializedSubscriber<?> serialized = (SerializedSubscriber<?>) test.scan(Scannable.Attr.ACTUAL);
         Assertions.assertThat(serialized).isNotNull();
         Assertions.assertThat(serialized.actual()).isSameAs(actual);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         Assertions.assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
         test.cancel();
@@ -283,6 +300,7 @@ public class FluxSkipUntilOtherTest extends FluxOperatorTest<String, String> {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(main);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         Assertions.assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
         main.cancel();

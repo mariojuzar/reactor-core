@@ -16,7 +16,7 @@
 
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
@@ -25,12 +25,15 @@ import reactor.test.MockUtils;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxArrayTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void arrayNull() {
-		Flux.fromArray((Integer[]) null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.fromArray((Integer[]) null);
+		});
 	}
 
 	@Test
@@ -99,6 +102,7 @@ public class FluxArrayTest {
 	public void scanOperator() {
 		FluxArray s = new FluxArray<>("A", "B", "C");
 		assertThat(s.scan(Scannable.Attr.BUFFERED)).isEqualTo(3);
+		assertThat(s.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test

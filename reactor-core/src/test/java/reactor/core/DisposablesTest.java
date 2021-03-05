@@ -19,8 +19,7 @@ package reactor.core;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
-import org.junit.Test;
-import reactor.core.scheduler.Schedulers;
+import org.junit.jupiter.api.Test;
 import reactor.test.FakeDisposable;
 import reactor.test.util.RaceTestUtils;
 
@@ -105,7 +104,7 @@ public class DisposablesTest {
 				}
 			};
 
-			RaceTestUtils.race(r, r, Schedulers.elastic());
+			RaceTestUtils.race(r, r);
 		}
 	}
 
@@ -120,7 +119,7 @@ public class DisposablesTest {
 				}
 			};
 
-			RaceTestUtils.race(r, r, Schedulers.elastic());
+			RaceTestUtils.race(r, r);
 		}
 	}
 
@@ -134,7 +133,7 @@ public class DisposablesTest {
 				}
 			};
 
-			RaceTestUtils.race(r, r, Schedulers.elastic());
+			RaceTestUtils.race(r, r);
 		}
 	}
 

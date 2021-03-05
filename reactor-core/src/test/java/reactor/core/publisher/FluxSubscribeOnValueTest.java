@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.logging.Level;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.CoreSubscriber;
 import reactor.core.Exceptions;
 import reactor.core.Fuseable;
@@ -28,7 +28,7 @@ import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertTrue;
+import static reactor.core.Scannable.from;
 
 public class FluxSubscribeOnValueTest {
 
@@ -55,8 +55,7 @@ public class FluxSubscribeOnValueTest {
 		int minExec = 2;
 
 		for (Integer counted : execs.values()) {
-			assertTrue("Thread used less than " + minExec + " " + "times",
-					counted >= minExec);
+			assertThat(counted).as("Thread used less than %d times", minExec).isGreaterThanOrEqualTo(minExec);
 		}
 
 	}
@@ -82,7 +81,8 @@ public class FluxSubscribeOnValueTest {
 		assertThat(test).isInstanceOf(Scannable.class)
 		                .isInstanceOf(FluxSubscribeOnValue.class);
 
-		assertThat(((Scannable) test).scan(Scannable.Attr.RUN_ON)).isSameAs(Schedulers.immediate());
+		assertThat(from(test).scan(Scannable.Attr.RUN_ON)).isSameAs(Schedulers.immediate());
+		assertThat(from(test).scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
 	}
 
 	@Test
@@ -93,6 +93,7 @@ public class FluxSubscribeOnValueTest {
 
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
         assertThat(test.scan(Scannable.Attr.BUFFERED)).isEqualTo(1);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
 
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.future = FluxSubscribeOnValue.ScheduledScalar.FINISHED;

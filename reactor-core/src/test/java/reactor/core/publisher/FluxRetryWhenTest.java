@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.LongAssert;
 import org.assertj.core.data.Percentage;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 
 import reactor.core.CoreSubscriber;
@@ -42,11 +42,13 @@ import reactor.test.StepVerifier;
 import reactor.test.scheduler.VirtualTimeScheduler;
 import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.context.Context;
+import reactor.util.context.ContextView;
 import reactor.util.function.Tuple2;
 import reactor.util.retry.Retry;
 import reactor.util.retry.RetryBackoffSpec;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxRetryWhenTest {
 
@@ -56,23 +58,186 @@ public class FluxRetryWhenTest {
 	Flux<Integer> rangeError = Flux.concat(Flux.range(1, 2),
 			Flux.error(new RuntimeException("forced failure 0")));
 
-	@Test(expected = NullPointerException.class)
-	public void sourceNull() {
-		new FluxRetryWhen<>(null, Retry.from(v -> v));
+	@Test
+	public void dontRepeat() {
+		AssertSubscriber<Integer> ts = AssertSubscriber.create();
+
+		rangeError.retryWhen(Retry.indefinitely().filter(e -> false))
+		      .subscribe(ts);
+
+		ts.assertValues(1, 2)
+		  .assertError(RuntimeException.class)
+		  .assertErrorMessage("forced failure 0")
+		  .assertNotComplete();
 	}
 
-	@SuppressWarnings({"deprecation", "unchecked", "rawtypes", "ConstantConditions"})
-	@Test(expected = NullPointerException.class)
-	public void whenThrowableFactoryNull() {
-		Flux.never()
-		    .retryWhen((Function) null);
+	@Test
+	public void predicateThrows() {
+		AssertSubscriber<Integer> ts = AssertSubscriber.create();
+
+		rangeError
+				.retryWhen(
+						Retry.indefinitely()
+						     .filter(e -> {
+							     throw new RuntimeException("forced failure");
+						     })
+				)
+				.subscribe(ts);
+
+		ts.assertValues(1, 2)
+		  .assertError(RuntimeException.class)
+		  .assertErrorMessage("forced failure")
+		  .assertNotComplete();
+	}
+
+	@Test
+	public void twoRetryNormal() {
+		AtomicInteger i = new AtomicInteger();
+
+		Mono<Long> source = Flux
+				.just("test", "test2", "test3")
+				.doOnNext(d -> {
+					if (i.getAndIncrement() < 2) {
+						throw new RuntimeException("test");
+					}
+				})
+				.retryWhen(Retry.indefinitely().filter(e -> i.get() <= 2))
+				.count();
+
+		StepVerifier.create(source)
+		            .expectNext(3L)
+		            .expectComplete()
+		            .verify();
+	}
+
+
+	@Test
+	public void twoRetryNormalSupplier() {
+		AtomicInteger i = new AtomicInteger();
+		AtomicBoolean bool = new AtomicBoolean(true);
+
+		Flux<Integer> source = Flux.defer(() -> {
+			return Flux.defer(() -> Flux.just(i.incrementAndGet()))
+			           .doOnNext(v -> {
+				           if (v < 4) {
+					           throw new RuntimeException("test");
+				           }
+				           else {
+					           bool.set(false);
+				           }
+			           })
+			           .retryWhen(Retry.indefinitely().filter(Flux.countingPredicate(e -> bool.get(), 3)));
+		});
+
+		StepVerifier.create(source)
+		            .expectNext(4)
+		            .expectComplete()
+		            .verify();
+	}
+
+	@Test
+	public void twoRetryErrorSupplier() {
+		AtomicInteger i = new AtomicInteger();
+		AtomicBoolean bool = new AtomicBoolean(true);
+
+		Flux<Integer> source = Flux.defer(() -> {
+			return Flux.defer(() -> Flux.just(i.incrementAndGet()))
+			           .doOnNext(v -> {
+				           if (v < 4) {
+					           if (v > 2) {
+						           bool.set(false);
+					           }
+					           throw new RuntimeException("test");
+				           }
+			           })
+			           .retryWhen(Retry.indefinitely().filter(Flux.countingPredicate(e -> bool.get(), 3)));
+		});
+
+		StepVerifier.create(source)
+		            .verifyErrorMessage("test");
+	}
+
+	@Test
+	public void twoRetryNormalSupplier3() {
+		AtomicInteger i = new AtomicInteger();
+		AtomicBoolean bool = new AtomicBoolean(true);
+
+		Flux<Integer> source = Flux.defer(() -> {
+			return Flux.defer(() -> Flux.just(i.incrementAndGet()))
+			           .doOnNext(v -> {
+				           if (v < 4) {
+					           throw new RuntimeException("test");
+				           }
+				           else {
+					           bool.set(false);
+				           }
+			           })
+			           .retryWhen(Retry.indefinitely().filter(Flux.countingPredicate(e -> bool.get(), 2)));
+		});
+
+		StepVerifier.create(source)
+		            .verifyErrorMessage("test");
+	}
+
+	@Test
+	public void twoRetryNormalSupplier2() {
+		AtomicInteger i = new AtomicInteger();
+		AtomicBoolean bool = new AtomicBoolean(true);
+
+		Flux<Integer> source = Flux.defer(() -> {
+			return Flux.defer(() -> Flux.just(i.incrementAndGet()))
+			           .doOnNext(v -> {
+				           if (v < 4) {
+					           throw new RuntimeException("test");
+				           }
+				           else {
+					           bool.set(false);
+				           }
+			           })
+			           .retryWhen(Retry.indefinitely().filter(Flux.countingPredicate(e -> bool.get(), 0)));
+		});
+
+		StepVerifier.create(source)
+		            .expectNext(4)
+		            .expectComplete()
+		            .verify();
+	}
+
+	@Test
+	public void twoRetryErrorSupplier2() {
+		AtomicInteger i = new AtomicInteger();
+		AtomicBoolean bool = new AtomicBoolean(true);
+
+		Flux<Integer> source = Flux.defer(() -> {
+			return Flux.defer(() -> Flux.just(i.incrementAndGet()))
+			           .doOnNext(v -> {
+				           if (v < 4) {
+					           if (v > 2) {
+						           bool.set(false);
+					           }
+					           throw new RuntimeException("test");
+				           }
+			           })
+			           .retryWhen(Retry.indefinitely().filter(Flux.countingPredicate(e -> bool.get(), 0)));
+		});
+
+		StepVerifier.create(source)
+		            .verifyErrorMessage("test");
+	}
+
+	@Test
+	public void sourceNull() {
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxRetryWhen<>(null, Retry.from(v -> v));
+		});
 	}
 
 	@SuppressWarnings("ConstantConditions")
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void whenRetrySignalFactoryNull() {
-		Flux.never()
-		    .retryWhen((Retry) null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never().retryWhen((Retry) null);
+		});
 	}
 
 	@Test
@@ -104,7 +269,7 @@ public class FluxRetryWhenTest {
 			         }
 		         });
 
-		assertThat(cancelled.get()).isEqualTo(1);
+		assertThat(cancelled).hasValue(1);
 	}
 
 	@Test
@@ -368,15 +533,26 @@ public class FluxRetryWhenTest {
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxRetryWhen<Integer> test = new FluxRetryWhen<>(parent, Retry.from(other -> Flux.just(2)));
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(-1);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanMainSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxRetryWhen.RetryWhenMainSubscriber<Integer> test =
-        		new FluxRetryWhen.RetryWhenMainSubscriber<>(actual, null, Flux.empty());
+        		new FluxRetryWhen.RetryWhenMainSubscriber<>(actual, null, Flux.empty(), Context.empty());
         Subscription parent = Operators.emptySubscription();
         test.onSubscribe(parent);
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
         test.requested = 35;
         Assertions.assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35L);
 
@@ -389,22 +565,23 @@ public class FluxRetryWhenTest {
     public void scanOtherSubscriber() {
 		CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxRetryWhen.RetryWhenMainSubscriber<Integer> main =
-        		new FluxRetryWhen.RetryWhenMainSubscriber<>(actual, null, Flux.empty());
+        		new FluxRetryWhen.RetryWhenMainSubscriber<>(actual, null, Flux.empty(), Context.empty());
         FluxRetryWhen.RetryWhenOtherSubscriber test = new FluxRetryWhen.RetryWhenOtherSubscriber();
         test.main = main;
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(main.otherArbiter);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(main);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
     }
 
 
 	@Test
 	public void inners() {
 		CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
-		CoreSubscriber<Retry.RetrySignal> signaller = new LambdaSubscriber<>(null, e -> {}, null, null);
+		Sinks.Many<Retry.RetrySignal> signaller = Sinks.unsafe().many().multicast().directBestEffort();
 		Flux<Integer> when = Flux.empty();
 		FluxRetryWhen.RetryWhenMainSubscriber<Integer> main = new FluxRetryWhen
-				.RetryWhenMainSubscriber<>(actual, signaller, when);
+				.RetryWhenMainSubscriber<>(actual, signaller, when, Context.empty());
 
 		List<Scannable> inners = main.inners().collect(Collectors.toList());
 
@@ -412,17 +589,47 @@ public class FluxRetryWhenTest {
 	}
 
 	@Test
+	public void retryContextExposedOnRetrySignal() {
+		AtomicInteger i = new AtomicInteger();
+
+		AtomicBoolean needsRollback = new AtomicBoolean();
+		ContextView ctx = Context.of("needsRollback", needsRollback);
+
+		Mono<Long> source = Flux
+				.just("test", "test2", "test3")
+				.doOnNext(d -> {
+					if (i.getAndIncrement() < 2) {
+						assertThat(needsRollback.compareAndSet(false, true)).as("needsRollback").isTrue();
+						throw new RuntimeException("test");
+					}
+				})
+				.retryWhen(Retry.indefinitely()
+						.withRetryContext(ctx)
+						.doBeforeRetry(rs -> {
+							AtomicBoolean atomic = rs.retryContextView().get("needsRollback");
+							assertThat(atomic.compareAndSet(true, false)).as("needsRollback").isTrue();
+						}))
+				.count();
+
+		StepVerifier.create(source)
+				.expectNext(3L)
+				.expectComplete()
+				.verify();
+
+	}
+
+	@Test
 	public void retryWhenContextTrigger_MergesOriginalContext() {
 		final int RETRY_COUNT = 3;
 		List<Integer> retriesLeft = Collections.synchronizedList(new ArrayList<>(4));
-		List<Context> contextPerRetry = Collections.synchronizedList(new ArrayList<>(4));
+		List<ContextView> contextPerRetry = Collections.synchronizedList(new ArrayList<>(4));
 
 		Flux<Object> retryWithContext =
 				Flux.error(new IllegalStateException("boom"))
 				    .doOnEach(sig -> {
-					    retriesLeft.add(sig.getContext().get("retriesLeft"));
+					    retriesLeft.add(sig.getContextView().get("retriesLeft"));
 					    if (!sig.isOnNext()) {
-						    contextPerRetry.add(sig.getContext());
+						    contextPerRetry.add(sig.getContextView());
 					    }
 				    })
 				    .retryWhen(Retry.from(retrySignalFlux -> retrySignalFlux.handle((rs, sink) -> {
@@ -435,8 +642,8 @@ public class FluxRetryWhenTest {
 		                    sink.error(Exceptions.retryExhausted("retries exhausted", rs.failure()));
 	                    }
                     })))
-				    .subscriberContext(Context.of("retriesLeft", RETRY_COUNT))
-					.subscriberContext(Context.of("thirdPartyContext", "present"));
+				    .contextWrite(Context.of("retriesLeft", RETRY_COUNT))
+					.contextWrite(Context.of("thirdPartyContext", "present"));
 
 		StepVerifier.create(retryWithContext)
 		            .expectErrorSatisfies(e -> assertThat(e).matches(Exceptions::isRetryExhausted, "isRetryExhausted")
@@ -864,7 +1071,6 @@ public class FluxRetryWhenTest {
 		});
 	}
 
-	@SuppressWarnings("deprecation")
 	@Test
 	public void retryWhenThrowableCompanionIsComparableToRetryWhenRetryFromFunction() {
 		AtomicInteger sourceHelper = new AtomicInteger();
@@ -877,7 +1083,7 @@ public class FluxRetryWhenTest {
 			}
 		});
 
-		StepVerifier.withVirtualTime(() -> source.retryWhen(companion -> companion.delayElements(Duration.ofSeconds(3))))
+		StepVerifier.withVirtualTime(() -> source.retryWhen(Retry.fixedDelay(Long.MAX_VALUE, Duration.ofSeconds(3))))
 		            .expectSubscription()
 		            .expectNoEvent(Duration.ofSeconds(3 * 3))
 		            .expectNext(1, 2, 3)
@@ -891,6 +1097,41 @@ public class FluxRetryWhenTest {
 		            .expectNoEvent(Duration.ofSeconds(3 * 3))
 		            .expectNext(1, 2, 3)
 		            .verifyComplete();
+	}
+
+	@Test
+	public void retryWhenWithThrowableFunction() {
+		AtomicInteger sourceHelper = new AtomicInteger();
+		Flux<Integer> source = Flux.create(sink -> {
+			if (sourceHelper.getAndIncrement() == 3) {
+				sink.next(1).next(2).next(3).complete();
+			}
+			else {
+				sink.error(new IllegalStateException("boom"));
+			}
+		});
+
+		Function<Flux<Throwable>, Flux<Long>> throwableBased = throwableFlux -> throwableFlux.index().map(Tuple2::getT1);
+
+		StepVerifier.create(source.retryWhen(Retry.withThrowable(throwableBased)))
+		            .expectSubscription()
+		            .expectNext(1, 2, 3)
+		            .verifyComplete();
+	}
+
+	@Test
+	void gh2488() {
+		for (int i = 0; i < 1_000; i++) {
+			AtomicInteger sourceHelper = new AtomicInteger();
+			Flux.just("hello")
+			    .doOnNext(m -> {
+				    if (sourceHelper.getAndIncrement() < 9) {
+					    throw new RuntimeException("Boom!");
+				    }
+			    })
+			    .retryWhen(Retry.fixedDelay(10, Duration.ofNanos(1)))
+			    .blockFirst(Duration.ofSeconds(1));
+		}
 	}
 
 }

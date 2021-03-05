@@ -23,8 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
@@ -161,23 +160,37 @@ public class FluxSubscribeOnTest {
 
 		Mono<Integer> p = Mono.fromCallable(count::incrementAndGet).subscribeOn(Schedulers.fromExecutorService(ForkJoinPool.commonPool()));
 
-		Assert.assertEquals(0, count.get());
+		assertThat(count).hasValue(0);
 
 		p.subscribeWith(AssertSubscriber.create()).await();
 
-		Assert.assertEquals(1, count.get());
+		assertThat(count).hasValue(1);
+	}
+
+	@Test
+	public void scanOperator(){
+	    Flux<Integer> parent = Flux.just(1);
+		Scheduler scheduler = Schedulers.single();
+		FluxSubscribeOn<Integer> test = new FluxSubscribeOn<>(parent, scheduler, false);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_ON)).isSameAs(scheduler);
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
 	}
 
 	@Test
     public void scanMainSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
-        FluxSubscribeOn.SubscribeOnSubscriber<Integer> test =
-        		new FluxSubscribeOn.SubscribeOnSubscriber<>(Flux.just(1), actual, Schedulers.single().createWorker(), true);
+		Scheduler.Worker worker = Schedulers.single().createWorker();
+		FluxSubscribeOn.SubscribeOnSubscriber<Integer> test =
+        		new FluxSubscribeOn.SubscribeOnSubscriber<>(Flux.just(1), actual, worker, true);
         Subscription parent = Operators.emptySubscription();
         test.onSubscribe(parent);
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        assertThat(test.scan(Scannable.Attr.RUN_ON)).isSameAs(worker);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
         test.requested = 35;
         assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35L);
 
@@ -202,7 +215,7 @@ public class FluxSubscribeOnTest {
 		}, DROP)
 		        .map(Flux.identityFunction()) //note the create is away from subscribeOn
 				.subscribeOn(Schedulers.newSingle("test")) //note there's no explicit parameter
-				.publishOn(Schedulers.elastic());
+				.publishOn(Schedulers.boundedElastic());
 
 		StepVerifier.create(test)
 		            .expectNextCount(Queues.SMALL_BUFFER_SIZE)
@@ -226,7 +239,7 @@ public class FluxSubscribeOnTest {
 		}, DROP)
 				.map(Function.identity())
 				.subscribeOn(Schedulers.single(), false)
-				.publishOn(Schedulers.elastic());
+				.publishOn(Schedulers.boundedElastic());
 
 		AtomicInteger count = new AtomicInteger();
 		StepVerifier.create(test)
@@ -253,7 +266,7 @@ public class FluxSubscribeOnTest {
 		}, DROP)
 				.map(Function.identity())
 				.subscribeOn(Schedulers.single(), true)
-				.publishOn(Schedulers.elastic());
+				.publishOn(Schedulers.boundedElastic());
 
 		AtomicInteger count = new AtomicInteger();
 		StepVerifier.create(test)
@@ -261,7 +274,7 @@ public class FluxSubscribeOnTest {
 		            .expectComplete()
 		            .verify(Duration.ofSeconds(5));
 
-		assertThat(count.get()).isEqualTo(Queues.SMALL_BUFFER_SIZE);
+		assertThat(count).hasValue(Queues.SMALL_BUFFER_SIZE);
 	}
 
 	@Test

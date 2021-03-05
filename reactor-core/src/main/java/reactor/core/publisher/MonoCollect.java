@@ -60,9 +60,17 @@ final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 		return new CollectSubscriber<>(actual, action, container);
 	}
 
+	@Override
+	public Object scanUnsafe(Attr key) {
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
+	}
+
 	static final class CollectSubscriber<T, R> extends Operators.MonoSubscriber<T, R>  {
 
 		final BiConsumer<? super R, ? super T> action;
+
+		R container;
 
 		Subscription s;
 
@@ -73,33 +81,16 @@ final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 				R container) {
 			super(actual);
 			this.action = action;
-			this.value = container;
+			this.container = container;
 		}
 
 		@Override
 		@Nullable
 		public Object scanUnsafe(Attr key) {
-			if (key == Attr.TERMINATED) return done;
 			if (key == Attr.PARENT) return s;
-
+			if (key == Attr.TERMINATED) return done;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 			return super.scanUnsafe(key);
-		}
-
-		@Override
-		public void cancel() {
-			super.cancel();
-			s.cancel();
-		}
-
-		@Override
-		protected void discard(R v) {
-			if (v instanceof Collection) {
-				Collection<?> c = (Collection<?>) v;
-				Operators.onDiscardMultiple(c, actual.currentContext());
-			}
-			else {
-				super.discard(v);
-			}
 		}
 
 		@Override
@@ -119,15 +110,22 @@ final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 				Operators.onNextDropped(t, actual.currentContext());
 				return;
 			}
-
-			try {
-				action.accept(value, t);
+			R c;
+			synchronized (this) {
+				c = container;
+				if (c != null) {
+					try {
+						action.accept(c, t);
+					}
+					catch (Throwable e) {
+						Context ctx = actual.currentContext();
+						Operators.onDiscard(t, ctx);
+						onError(Operators.onOperatorError(this, e, t, ctx));
+					}
+					return;
+				}
 			}
-			catch (Throwable e) {
-				Context ctx = actual.currentContext();
-				Operators.onDiscard(t, ctx);
-				onError(Operators.onOperatorError(this, e, t, ctx));
-			}
+			Operators.onDiscard(t, actual.currentContext());
 		}
 
 		@Override
@@ -137,9 +135,12 @@ final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 				return;
 			}
 			done = true;
-			R v = value;
-			discard(v);
-			value = null;
+			R c;
+			synchronized (this) {
+				c = container;
+				container = null;
+			}
+			discard(c);
 			actual.onError(t);
 		}
 
@@ -149,13 +150,48 @@ final class MonoCollect<T, R> extends MonoFromFluxOperator<T, R>
 				return;
 			}
 			done = true;
-			complete(value);
+			R c;
+			synchronized (this) {
+				c = container;
+				container = null;
+			}
+			if (c != null) {
+				complete(c);
+			}
 		}
 
 		@Override
-		public void setValue(R value) {
-			// value is constant
+		protected void discard(R v) {
+			if (v instanceof Collection) {
+				Collection<?> c = (Collection<?>) v;
+				Operators.onDiscardMultiple(c, actual.currentContext());
+			}
+			else {
+				super.discard(v);
+			}
 		}
 
+		@Override
+		public void cancel() {
+			int state;
+			R c;
+			synchronized (this) {
+				state = STATE.getAndSet(this, CANCELLED);
+				if (state != CANCELLED) {
+					s.cancel();
+				}
+				if (state <= HAS_REQUEST_NO_VALUE) {
+					c = container;
+					this.value = null;
+					container = null;
+				}
+				else {
+					c = null;
+				}
+			}
+			if (c != null) {
+				discard(c);
+			}
+		}
 	}
 }

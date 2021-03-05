@@ -21,12 +21,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
-import reactor.test.subscriber.AssertSubscriber;
 
 public class ScatterGatherTests {
 
@@ -38,7 +36,7 @@ public class ScatterGatherTests {
 		    .flatMap(value -> Mono.fromCallable(() -> {
 								    Thread.sleep(1000);
 								    return value;
-							    }).subscribeOn(Schedulers.elastic()))
+							    }).subscribeOn(Schedulers.boundedElastic()))
 		    .log("merged")
 		    .collect(Result::new, Result::add)
 		    .doOnNext(Result::stop)

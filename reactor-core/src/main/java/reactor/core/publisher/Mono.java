@@ -1,11 +1,11 @@
 /*
- * Copyright (c) 2011-2018 Pivotal Software Inc, All Rights Reserved.
+ * Copyright (c) 2011-Present VMware Inc. or its affiliates, All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *       https://www.apache.org/licenses/LICENSE-2.0
+ *        https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,12 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package reactor.core.publisher;
 
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
@@ -39,8 +39,8 @@ import java.util.function.LongConsumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Level;
-import java.util.stream.LongStream;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -61,6 +61,7 @@ import reactor.util.Metrics;
 import reactor.util.annotation.Nullable;
 import reactor.util.concurrent.Queues;
 import reactor.util.context.Context;
+import reactor.util.context.ContextView;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuple3;
 import reactor.util.function.Tuple4;
@@ -72,8 +73,14 @@ import reactor.util.function.Tuples;
 import reactor.util.retry.Retry;
 
 /**
- * A Reactive Streams {@link Publisher} with basic rx operators that completes successfully by
- * emitting an element, or with an error.
+ * A Reactive Streams {@link Publisher} with basic rx operators that emits at most one item <em>via</em> the
+ * {@code onNext} signal then terminates with an {@code onComplete} signal (successful Mono,
+ * with or without value), or only emits a single {@code onError} signal (failed Mono).
+ *
+ * <p>Most Mono implementations are expected to immediately call {@link Subscriber#onComplete()}
+ * after having called {@link Subscriber#onNext(T)}. {@link Mono#never() Mono.never()} is an outlier: it doesn't
+ * emit any signal, which is not technically forbidden although not terribly useful outside
+ * of tests. On the other hand, a combination of {@code onNext} and {@code onError} is explicitly forbidden.
  *
  * <p>
  * The recommended way to learn about the {@link Mono} API and discover new operators is
@@ -138,9 +145,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *             }
 	 *         }
 	 *     };
-	 *     
+	 *
 	 *     client.addListener(listener);
-	 *     
+	 *
 	 *     sink.onDispose(() -&gt; client.removeListener(listener));
 	 * });
 	 * </code></pre>
@@ -199,8 +206,8 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <p>
 	 * @param supplier a {@link Mono} factory
 	 * @param <T> the element type of the returned Mono instance
-	 * @return a new {@link Mono} factory
-	 * @see #deferWithContext(Function)
+	 * @return a deferred {@link Mono}
+	 * @see #deferContextual(Function)
 	 */
 	public static <T> Mono<T> defer(Supplier<? extends Mono<? extends T>> supplier) {
 		return onAssembly(new MonoDefer<>(supplier));
@@ -215,12 +222,31 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/deferForMono.svg" alt="">
 	 * <p>
-	 * @param supplier a {@link Mono} factory
+	 * @param contextualMonoFactory a {@link Mono} factory
 	 * @param <T> the element type of the returned Mono instance
-	 * @return a new {@link Mono} factory
+	 * @return a deferred {@link Mono} deriving actual {@link Mono} from context values for each subscription
+	 * @deprecated use {@link #deferContextual(Function)} instead. to be removed in 3.5.0.
 	 */
-	public static <T> Mono<T> deferWithContext(Function<Context, ? extends Mono<? extends T>> supplier) {
-		return onAssembly(new MonoDeferWithContext<>(supplier));
+	@Deprecated
+	public static <T> Mono<T> deferWithContext(Function<Context, ? extends Mono<? extends T>> contextualMonoFactory) {
+		return deferContextual(view -> contextualMonoFactory.apply(Context.of(view)));
+	}
+
+	/**
+	 * Create a {@link Mono} provider that will {@link Function#apply supply} a target {@link Mono}
+	 * to subscribe to for each {@link Subscriber} downstream.
+	 * This operator behaves the same way as {@link #defer(Supplier)},
+	 * but accepts a {@link Function} that will receive the current {@link ContextView} as an argument.
+	 *
+	 * <p>
+	 * <img class="marble" src="doc-files/marbles/deferForMono.svg" alt="">
+	 * <p>
+	 * @param contextualMonoFactory a {@link Mono} factory
+	 * @param <T> the element type of the returned Mono instance
+	 * @return a deferred {@link Mono} deriving actual {@link Mono} from context values for each subscription
+	 */
+	public static <T> Mono<T> deferContextual(Function<ContextView, ? extends Mono<? extends T>> contextualMonoFactory) {
+		return onAssembly(new MonoDeferContextual<>(contextualMonoFactory));
 	}
 
 	/**
@@ -254,7 +280,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @return a new {@link Mono}
 	 */
 	public static Mono<Long> delay(Duration duration, Scheduler timer) {
-		return onAssembly(new MonoDelay(duration.toMillis(), TimeUnit.MILLISECONDS, timer));
+		return onAssembly(new MonoDelay(duration.toNanos(), TimeUnit.NANOSECONDS, timer));
 	}
 
 	/**
@@ -307,16 +333,18 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * and replay that signal, effectively behaving like the fastest of these competing
 	 * sources.
 	 * <p>
-	 * <img class="marble" src="doc-files/marbles/firstForMono.svg" alt="">
+	 * <img class="marble" src="doc-files/marbles/firstWithSignalForMono.svg" alt="">
 	 * <p>
 	 * @param monos The deferred monos to use.
 	 * @param <T> The type of the function result.
 	 *
 	 * @return a new {@link Mono} behaving like the fastest of its sources.
+	 * @deprecated use {@link #firstWithSignal(Mono[])}. To be removed in reactor 3.5.
 	 */
 	@SafeVarargs
+	@Deprecated
 	public static <T> Mono<T> first(Mono<? extends T>... monos) {
-		return onAssembly(new MonoFirst<>(monos));
+		return firstWithSignal(monos);
 	}
 
 	/**
@@ -324,15 +352,128 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * and replay that signal, effectively behaving like the fastest of these competing
 	 * sources.
 	 * <p>
-	 * <img class="marble" src="doc-files/marbles/firstForMono.svg" alt="">
+	 * <img class="marble" src="doc-files/marbles/firstWithSignalForMono.svg" alt="">
+	 * <p>
+	 * @param monos The deferred monos to use.
+	 * @param <T> The type of the function result.
+	 *
+	 * @return a new {@link Mono} behaving like the fastest of its sources.
+	 * @deprecated use {@link #firstWithSignal(Iterable)}. To be removed in reactor 3.5.
+	 */
+	@Deprecated
+	public static <T> Mono<T> first(Iterable<? extends Mono<? extends T>> monos) {
+		return firstWithSignal(monos);
+	}
+
+	/**
+	 * Pick the first {@link Mono} to emit any signal (value, empty completion or error)
+	 * and replay that signal, effectively behaving like the fastest of these competing
+	 * sources.
+	 * <p>
+	 * <img class="marble" src="doc-files/marbles/firstWithSignalForMono.svg" alt="">
 	 * <p>
 	 * @param monos The deferred monos to use.
 	 * @param <T> The type of the function result.
 	 *
 	 * @return a new {@link Mono} behaving like the fastest of its sources.
 	 */
-	public static <T> Mono<T> first(Iterable<? extends Mono<? extends T>> monos) {
-		return onAssembly(new MonoFirst<>(monos));
+	@SafeVarargs
+	public static <T> Mono<T> firstWithSignal(Mono<? extends T>... monos) {
+		return onAssembly(new MonoFirstWithSignal<>(monos));
+	}
+
+	/**
+	 * Pick the first {@link Mono} to emit any signal (value, empty completion or error)
+	 * and replay that signal, effectively behaving like the fastest of these competing
+	 * sources.
+	 * <p>
+	 * <img class="marble" src="doc-files/marbles/firstWithSignalForMono.svg" alt="">
+	 * <p>
+	 * @param monos The deferred monos to use.
+	 * @param <T> The type of the function result.
+	 *
+	 * @return a new {@link Mono} behaving like the fastest of its sources.
+	 */
+	public static <T> Mono<T> firstWithSignal(Iterable<? extends Mono<? extends T>> monos) {
+		return onAssembly(new MonoFirstWithSignal<>(monos));
+	}
+
+	/**
+	 * Pick the first {@link Mono} source to emit any value and replay that signal,
+	 * effectively behaving like the source that first emits an
+	 * {@link Subscriber#onNext(Object) onNext}.
+	 *
+	 * <p>
+	 * Valued sources always "win" over an empty source (one that only emits onComplete)
+	 * or a failing source (one that only emits onError).
+	 * <p>
+	 * When no source can provide a value, this operator fails with a {@link NoSuchElementException}
+	 * (provided there are at least two sources). This exception has a {@link Exceptions#multiple(Throwable...) composite}
+	 * as its {@link Throwable#getCause() cause} that can be used to inspect what went wrong with each source
+	 * (so the composite has as many elements as there are sources).
+	 * <p>
+	 * Exceptions from failing sources are directly reflected in the composite at the index of the failing source.
+	 * For empty sources, a {@link NoSuchElementException} is added at their respective index.
+	 * One can use {@link Exceptions#unwrapMultiple(Throwable) Exceptions.unwrapMultiple(topLevel.getCause())}
+	 * to easily inspect these errors as a {@link List}.
+	 * <p>
+	 * Note that like in {@link #firstWithSignal(Iterable)}, an infinite source can be problematic
+	 * if no other source emits onNext.
+	 * <p>
+	 * <img class="marble" src="doc-files/marbles/firstWithValueForMono.svg" alt="">
+	 *
+	 * @param monos An {@link Iterable} of the competing source monos
+	 * @param <T> The type of the element in the sources and the resulting mono
+	 *
+	 * @return a new {@link Mono} behaving like the fastest of its sources
+	 */
+	public static <T> Mono<T> firstWithValue(Iterable<? extends Mono<? extends T>> monos) {
+		return onAssembly(new MonoFirstWithValue<>(monos));
+	}
+
+	/**
+	 * Pick the first {@link Mono} source to emit any value and replay that signal,
+	 * effectively behaving like the source that first emits an
+	 * {@link Subscriber#onNext(Object) onNext}.
+	 * <p>
+	 * Valued sources always "win" over an empty source (one that only emits onComplete)
+	 * or a failing source (one that only emits onError).
+	 * <p>
+	 * When no source can provide a value, this operator fails with a {@link NoSuchElementException}
+	 * (provided there are at least two sources). This exception has a {@link Exceptions#multiple(Throwable...) composite}
+	 * as its {@link Throwable#getCause() cause} that can be used to inspect what went wrong with each source
+	 * (so the composite has as many elements as there are sources).
+	 * <p>
+	 * Exceptions from failing sources are directly reflected in the composite at the index of the failing source.
+	 * For empty sources, a {@link NoSuchElementException} is added at their respective index.
+	 * One can use {@link Exceptions#unwrapMultiple(Throwable) Exceptions.unwrapMultiple(topLevel.getCause())}
+	 * to easily inspect these errors as a {@link List}.
+	 * <p>
+	 * Note that like in {@link #firstWithSignal(Mono[])}, an infinite source can be problematic
+	 * if no other source emits onNext.
+	 * In case the {@code first} source is already an array-based {@link #firstWithValue(Mono, Mono[])}
+	 * instance, nesting is avoided: a single new array-based instance is created with all the
+	 * sources from {@code first} plus all the {@code others} sources at the same level.
+	 * <p>
+	 * <img class="marble" src="doc-files/marbles/firstWithValueForMono.svg" alt="">
+	 *
+	 * @param first the first competing source {@link Mono}
+	 * @param others the other competing sources {@link Mono}
+	 * @param <T> The type of the element in the sources and the resulting mono
+	 *
+	 * @return a new {@link Mono} behaving like the fastest of its sources
+	 */
+	@SafeVarargs
+	public static <T> Mono<T> firstWithValue(Mono<? extends T> first, Mono<? extends T>... others) {
+		if (first instanceof MonoFirstWithValue) {
+			@SuppressWarnings("unchecked")
+			MonoFirstWithValue<T> a = (MonoFirstWithValue<T>) first;
+			Mono<T> result =  a.firstValuedAdditionalSources(others);
+			if (result != null) {
+				return result;
+			}
+		}
+		return onAssembly(new MonoFirstWithValue<>(first, others));
 	}
 
 	/**
@@ -549,7 +690,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/ignoreElementsForMono.svg" alt="">
 	 * <p>
 	 *
-	 * @reactor.discard This operator discards the element from the source.
+	 * <p><strong>Discard Support:</strong> This operator discards the element from the source.
 	 *
 	 * @param source the {@link Publisher} to ignore
 	 * @param <T> the source type of the ignored data
@@ -685,7 +826,10 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *
 	 * @return a new {@link Mono} emitting current context
 	 * @see #subscribe(CoreSubscriber)
+	 * @deprecated Use {@link #deferContextual(Function)} or {@link #transformDeferredContextual(BiFunction)} to materialize
+	 * the context. To obtain the same Mono of Context, use {@code Mono.deferContextual(Mono::just)}. To be removed in 3.5.0.
 	 */
+	@Deprecated
 	public static Mono<Context> subscriberContext() {
 		return onAssembly(MonoCurrentContext.INSTANCE);
 	}
@@ -778,7 +922,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * triggers a short-circuit of the main sequence with the same terminal signal
 	 * (no cleanup is invoked).
 	 *
-	 * @reactor.discard This operator discards any source element if the {@code asyncCleanup} handler fails.
+	 * <p><strong>Discard Support:</strong> This operator discards any source element if the {@code asyncCleanup} handler fails.
 	 *
 	 * @param resourceSupplier a {@link Publisher} that "generates" the resource,
 	 * subscribed for each subscription to the main sequence
@@ -796,125 +940,6 @@ public abstract class Mono<T> implements CorePublisher<T> {
 		return usingWhen(resourceSupplier, resourceClosure, asyncCleanup,
 				(res, error) -> asyncCleanup.apply(res),
 				asyncCleanup);
-	}
-
-	/**
-	 * Uses a resource, generated by a {@link Publisher} for each individual {@link Subscriber},
-	 * to derive a {@link Mono}. Note that all steps of the operator chain that would need the
-	 * resource to be in an open stable state need to be described inside the {@code resourceClosure}
-	 * {@link Function}.
-	 * <p>
-	 * Unlike in {@link Flux#usingWhen(Publisher, Function, Function, Function) the Flux counterpart},
-	 * ALL signals are deferred until the {@link Mono} terminates and the relevant {@link Function}
-	 * generates and invokes a "cleanup" {@link Publisher}. This is because a failure in the cleanup Publisher
-	 * must result in a lone {@code onError} signal in the downstream {@link Mono} (any potential value in the
-	 * derived {@link Mono} is discarded). Here are the various scenarios that can play out:
-	 * <ul>
-	 *     <li>empty Mono, asyncComplete ends with {@code onComplete()}: downstream receives {@code onComplete()}</li>
-	 *     <li>empty Mono, asyncComplete ends with {@code onError(t)}: downstream receives {@code onError(t)}</li>
-	 *     <li>valued Mono, asyncComplete ends with {@code onComplete()}: downstream receives {@code onNext(value),onComplete()}</li>
-	 *     <li>valued Mono, asyncComplete ends with {@code onError(t)}: downstream receives {@code onError(t)}, {@code value} is discarded</li>
-	 *     <li>error(e) Mono, errorComplete ends with {@code onComplete()}: downstream receives {@code onError(e)}</li>
-	 *     <li>error(e) Mono, errorComplete ends with {@code onError(t)}: downstream receives {@code onError(t)}, t suppressing e</li>
-	 * </ul>
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/usingWhenSuccessForMono.svg" alt="">
-	 * <p>
-	 * A dedicated cleanup can also be associated with mono error termination:
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/usingWhenFailureForMono.svg" alt="">
-	 * <p>
-	 * Note that if the resource supplying {@link Publisher} emits more than one resource, the
-	 * subsequent resources are dropped ({@link Operators#onNextDropped(Object, Context)}). If
-	 * the publisher errors AFTER having emitted one resource, the error is also silently dropped
-	 * ({@link Operators#onErrorDropped(Throwable, Context)}).
-	 * An empty completion or error without at least one onNext signal (no resource supplied)
-	 * triggers a short-circuit of the main sequence with the same terminal signal
-	 * (no cleanup is invoked).
-	 *
-	 * @reactor.discard This operator discards the element if the {@code asyncComplete} handler fails.
-	 *
-	 * @param resourceSupplier a {@link Publisher} that "generates" the resource,
-	 * subscribed for each subscription to the main sequence
-	 * @param resourceClosure a factory to derive a {@link Mono} from the supplied resource
-	 * @param asyncComplete an asynchronous resource cleanup invoked if the resource closure terminates with onComplete
-	 * @param asyncError an asynchronous resource cleanup invoked if the resource closure terminates with onError
-	 * @param <T> the type of elements emitted by the resource closure, and thus the main sequence
-	 * @param <D> the type of the resource object
-	 * @return a new {@link Mono} built around a "transactional" resource, with deferred emission until the
-	 * asynchronous cleanup sequence relevant to the termination signal completes
-	 * @deprecated prefer using the {@link #usingWhen(Publisher, Function, Function, BiFunction, Function)} version which is more explicit about all termination cases,
-	 * will be removed in 3.4.0
-	 */
-	@Deprecated
-	public static <T, D> Mono<T> usingWhen(Publisher<D> resourceSupplier,
-			Function<? super D, ? extends Mono<? extends T>> resourceClosure,
-			Function<? super D, ? extends Publisher<?>> asyncComplete,
-			Function<? super D, ? extends Publisher<?>> asyncError) {
-		return onAssembly(new MonoUsingWhen<>(resourceSupplier, resourceClosure,
-				asyncComplete, (res, err) -> asyncError.apply(res), null));
-	}
-
-	/**
-	 * Uses a resource, generated by a {@link Publisher} for each individual {@link Subscriber},
-	 * to derive a {@link Mono}.Note that all steps of the operator chain that would need the
-	 * resource to be in an open stable state need to be described inside the {@code resourceClosure}
-	 * {@link Function}.
-	 * <p>
-	 * Unlike in {@link Flux#usingWhen(Publisher, Function, Function, Function, Function) the Flux counterpart},
-	 * ALL signals are deferred until the {@link Mono} terminates and the relevant {@link Function}
-	 * generates and invokes a "cleanup" {@link Publisher}. This is because a failure in the cleanup Publisher
-	 * must result in a lone {@code onError} signal in the downstream {@link Mono} (any potential value in the
-	 * derived {@link Mono} is discarded). Here are the various scenarios that can play out:
-	 * <ul>
-	 *     <li>empty Mono, asyncComplete ends with {@code onComplete()}: downstream receives {@code onComplete()}</li>
-	 *     <li>empty Mono, asyncComplete ends with {@code onError(t)}: downstream receives {@code onError(t)}</li>
-	 *     <li>valued Mono, asyncComplete ends with {@code onComplete()}: downstream receives {@code onNext(value),onComplete()}</li>
-	 *     <li>valued Mono, asyncComplete ends with {@code onError(t)}: downstream receives {@code onError(t)}, {@code value} is discarded</li>
-	 *     <li>error(e) Mono, errorComplete ends with {@code onComplete()}: downstream receives {@code onError(e)}</li>
-	 *     <li>error(e) Mono, errorComplete ends with {@code onError(t)}: downstream receives {@code onError(t)}, t suppressing e</li>
-	 * </ul>
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/usingWhenSuccessForMono.svg" alt="">
-	 * <p>
-	 * Individual cleanups can also be associated with mono cancellation and
-	 * error terminations:
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/usingWhenFailureForMono.svg" alt="">
-	 * <p>
-	 * Note that if the resource supplying {@link Publisher} emits more than one resource, the
-	 * subsequent resources are dropped ({@link Operators#onNextDropped(Object, Context)}). If
-	 * the publisher errors AFTER having emitted one resource, the error is also silently dropped
-	 * ({@link Operators#onErrorDropped(Throwable, Context)}).
-	 * An empty completion or error without at least one onNext signal (no resource supplied)
-	 * triggers a short-circuit of the main sequence with the same terminal signal
-	 * (no cleanup is invoked).
-	 *
-	 * @reactor.discard This operator discards the element if the {@code asyncComplete} handler fails.
-	 *
-	 * @param resourceSupplier a {@link Publisher} that "generates" the resource,
-	 * subscribed for each subscription to the main sequence
-	 * @param resourceClosure a factory to derive a {@link Mono} from the supplied resource
-	 * @param asyncComplete an asynchronous resource cleanup invoked if the resource closure terminates with onComplete
-	 * @param asyncError an asynchronous resource cleanup invoked if the resource closure terminates with onError
-	 * @param asyncCancel an asynchronous resource cleanup invoked if the resource closure is cancelled.
-	 * By default the {@code asyncComplete} path is used.
-	 * @param <T> the type of elements emitted by the resource closure, and thus the main sequence
-	 * @param <D> the type of the resource object
-	 * @return a new {@link Mono} built around a "transactional" resource, with deferred emission until the
-	 * asynchronous cleanup sequence relevant to the termination signal completes
-	 * @deprecated prefer using the {@link #usingWhen(Publisher, Function, Function, BiFunction, Function)} version which is more explicit about all termination cases,
-	 * will be removed in 3.4.0
-	 */
-	@Deprecated
-	public static <T, D> Mono<T> usingWhen(Publisher<D> resourceSupplier,
-			Function<? super D, ? extends Mono<? extends T>> resourceClosure,
-			Function<? super D, ? extends Publisher<?>> asyncComplete,
-			Function<? super D, ? extends Publisher<?>> asyncError,
-			//the operator itself accepts null for asyncCancel, but we won't in the public API
-			Function<? super D, ? extends Publisher<?>> asyncCancel) {
-		return onAssembly(new MonoUsingWhen<>(resourceSupplier, resourceClosure,
-				asyncComplete, (res, err) -> asyncError.apply(res), asyncCancel));
 	}
 
 	/**
@@ -952,7 +977,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * triggers a short-circuit of the main sequence with the same terminal signal
 	 * (no cleanup is invoked).
 	 *
-	 * @reactor.discard This operator discards the element if the {@code asyncComplete} handler fails.
+	 * <p><strong>Discard Support:</strong> This operator discards the element if the {@code asyncComplete} handler fails.
 	 *
 	 * @param resourceSupplier a {@link Publisher} that "generates" the resource,
 	 * subscribed for each subscription to the main sequence
@@ -964,9 +989,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * When {@code null}, the {@code asyncComplete} path is used instead.
 	 * @param <T> the type of elements emitted by the resource closure, and thus the main sequence
 	 * @param <D> the type of the resource object
-	 * @return a new {@link Flux} built around a "transactional" resource, with several
+	 * @return a new {@link Mono} built around a "transactional" resource, with several
 	 * termination path triggering asynchronous cleanup sequences
-	 * @see #usingWhen(Publisher, Function, Function, Function)
+	 *
 	 */
 	public static <T, D> Mono<T> usingWhen(Publisher<D> resourceSupplier,
 			Function<? super D, ? extends Mono<? extends T>> resourceClosure,
@@ -1020,9 +1045,8 @@ public abstract class Mono<T> implements CorePublisher<T> {
 
 	/**
 	 * Aggregate given publishers into a new {@literal Mono} that will be
-	 * fulfilled when all of the given {@literal sources} have completed. If any Publisher
-	 * terminates without value, the returned sequence will be terminated immediately and
-	 * pending results cancelled. Errors from the sources are delayed.
+	 * fulfilled when all of the given {@literal sources} have completed. Errors from
+	 * the sources are delayed.
 	 * If several Publishers error, the exceptions are combined (as suppressed exceptions on a root exception).
 	 *
 	 * <p>
@@ -1628,7 +1652,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param <P> the returned instance type
 	 *
 	 * @return the {@link Mono} transformed to an instance of P
-	 * @see #compose for a bounded conversion to {@link Publisher}
+	 * @see #transformDeferred(Function) transformDeferred(Function) for a lazy transformation of Mono
 	 */
 	public final <P> P as(Function<? super Mono<T>, P> transformer) {
 		return transformer.apply(this);
@@ -1700,7 +1724,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	public T block(Duration timeout) {
 		BlockingMonoSubscriber<T> subscriber = new BlockingMonoSubscriber<>();
 		subscribe((Subscriber<T>) subscriber);
-		return subscriber.blockingGet(timeout.toMillis(), TimeUnit.MILLISECONDS);
+		return subscriber.blockingGet(timeout.toNanos(), TimeUnit.NANOSECONDS);
 	}
 
 	/**
@@ -1746,7 +1770,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	public Optional<T> blockOptional(Duration timeout) {
 		BlockingOptionalMonoSubscriber<T> subscriber = new BlockingOptionalMonoSubscriber<>();
 		subscribe((Subscriber<T>) subscriber);
-		return subscriber.blockingGet(timeout.toMillis(), TimeUnit.MILLISECONDS);
+		return subscriber.blockingGet(timeout.toNanos(), TimeUnit.NANOSECONDS);
 	}
 
 	/**
@@ -1813,7 +1837,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	/**
 	 * Turn this {@link Mono} into a hot source and cache last emitted signal for further
 	 * {@link Subscriber}, with an expiry timeout (TTL) that depends on said signal.
-	 * An TTL of {@link Long#MAX_VALUE} milliseconds is interpreted as indefinite caching of
+	 * A TTL of {@link Long#MAX_VALUE} milliseconds is interpreted as indefinite caching of
 	 * the signal (no cache cleanup is scheduled, so the signal is retained as long as this
 	 * {@link Mono} is not garbage collected).
 	 * <p>
@@ -1838,11 +1862,41 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	public final Mono<T> cache(Function<? super T, Duration> ttlForValue,
 			Function<Throwable, Duration> ttlForError,
 			Supplier<Duration> ttlForEmpty) {
-		return onAssembly(new MonoCacheTime<>(this,
-				ttlForValue, ttlForError, ttlForEmpty,
-				Schedulers.parallel()));
+		return cache(ttlForValue, ttlForError, ttlForEmpty, Schedulers.parallel());
 	}
 
+	/**
+	 * Turn this {@link Mono} into a hot source and cache last emitted signal for further
+	 * {@link Subscriber}, with an expiry timeout (TTL) that depends on said signal.
+	 * A TTL of {@link Long#MAX_VALUE} milliseconds is interpreted as indefinite caching of
+	 * the signal (no cache cleanup is scheduled, so the signal is retained as long as this
+	 * {@link Mono} is not garbage collected).
+	 * <p>
+	 * Empty completion and Error will also be replayed according to their respective TTL,
+	 * so transient errors can be "retried" by letting the {@link Function} return
+	 * {@link Duration#ZERO}. Such a transient exception would then be propagated to the first
+	 * subscriber but the following subscribers would trigger a new source subscription.
+	 * <p>
+	 * Exceptions in the TTL generators themselves are processed like the {@link Duration#ZERO}
+	 * case, except the original signal is {@link Exceptions#addSuppressed(Throwable, Throwable)  suppressed}
+	 * (in case of onError) or {@link Hooks#onNextDropped(Consumer) dropped}
+	 * (in case of onNext).
+	 * <p>
+	 * Note that subscribers that come in perfectly simultaneously could receive the same
+	 * cached signal even if the TTL is set to zero.
+	 *
+	 * @param ttlForValue the TTL-generating {@link Function} invoked when source is valued
+	 * @param ttlForError the TTL-generating {@link Function} invoked when source is erroring
+	 * @param ttlForEmpty the TTL-generating {@link Supplier} invoked when source is empty
+	 * @param timer the {@link Scheduler} on which to measure the duration.
+	 * @return a replaying {@link Mono}
+	 */
+	public final Mono<T> cache(Function<? super T, Duration> ttlForValue,
+			Function<Throwable, Duration> ttlForError,
+			Supplier<Duration> ttlForEmpty,
+			Scheduler timer) {
+		return onAssembly(new MonoCacheTime<>(this, ttlForValue, ttlForError, ttlForEmpty, timer));
+	}
 	/**
 	 * Prepare this {@link Mono} so that subscribers will cancel from it on a
 	 * specified
@@ -1947,31 +2001,6 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * Defer the given transformation to this {@link Mono} in order to generate a
-	 * target {@link Mono} type. A transformation will occur for each
-	 * {@link Subscriber}. For instance:
-	 *
-	 * <blockquote><pre>
-	 * mono.compose(original -> original.log());
-	 * </pre></blockquote>
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/transformDeferredForMono.svg" alt="">
-	 *
-	 * @param transformer the {@link Function} to lazily map this {@link Mono} into a target {@link Mono}
-	 * instance upon subscription.
-	 * @param <V> the item type in the returned {@link Publisher}
-	 *
-	 * @return a new {@link Mono}
-	 * @see #as as() for a loose conversion to an arbitrary type
-	 * @see #transform(Function)
-	 * @deprecated will be removed in 3.4.0, use {@link #transformDeferred(Function)} instead
-	 */
-	@Deprecated
-	public final <V> Mono<V> compose(Function<? super Mono<T>, ? extends Publisher<V>> transformer) {
-		return transformDeferred(transformer);
-	}
-
-	/**
 	 * Concatenate emissions of this {@link Mono} with the provided {@link Publisher}
 	 * (no interleave).
 	 * <p>
@@ -1983,6 +2012,52 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 */
 	public final Flux<T> concatWith(Publisher<? extends T> other) {
 		return Flux.concat(this, other);
+	}
+
+	/**
+	 * Enrich the {@link Context} visible from downstream for the benefit of upstream
+	 * operators, by making all values from the provided {@link ContextView} visible on top
+	 * of pairs from downstream.
+	 * <p>
+	 * A {@link Context} (and its {@link ContextView}) is tied to a given subscription
+	 * and is read by querying the downstream {@link Subscriber}. {@link Subscriber} that
+	 * don't enrich the context instead access their own downstream's context. As a result,
+	 * this operator conceptually enriches a {@link Context} coming from under it in the chain
+	 * (downstream, by default an empty one) and makes the new enriched {@link Context}
+	 * visible to operators above it in the chain.
+	 *
+	 * @param contextToAppend the {@link ContextView} to merge with the downstream {@link Context},
+	 * resulting in a new more complete {@link Context} that will be visible from upstream.
+	 *
+	 * @return a contextualized {@link Mono}
+	 * @see ContextView
+	 */
+	public final Mono<T> contextWrite(ContextView contextToAppend) {
+		return contextWrite(c -> c.putAll(contextToAppend));
+	}
+
+	/**
+	 * Enrich the {@link Context} visible from downstream for the benefit of upstream
+	 * operators, by applying a {@link Function} to the downstream {@link Context}.
+	 * <p>
+	 * The {@link Function} takes a {@link Context} for convenience, allowing to easily
+	 * call {@link Context#put(Object, Object) write APIs} to return a new {@link Context}.
+	 * <p>
+	 * A {@link Context} (and its {@link ContextView}) is tied to a given subscription
+	 * and is read by querying the downstream {@link Subscriber}. {@link Subscriber} that
+	 * don't enrich the context instead access their own downstream's context. As a result,
+	 * this operator conceptually enriches a {@link Context} coming from under it in the chain
+	 * (downstream, by default an empty one) and makes the new enriched {@link Context}
+	 * visible to operators above it in the chain.
+	 *
+	 * @param contextModifier the {@link Function} to apply to the downstream {@link Context},
+	 * resulting in a new more complete {@link Context} that will be visible from upstream.
+	 *
+	 * @return a contextualized {@link Mono}
+	 * @see Context
+	 */
+	public final Mono<T> contextWrite(Function<Context, Context> contextModifier) {
+		return onAssembly(new MonoContextWrite<>(this, contextModifier));
 	}
 
 	/**
@@ -2049,7 +2124,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @return a delayed {@link Mono}
 	 */
 	public final Mono<T> delayElement(Duration delay, Scheduler timer) {
-		return onAssembly(new MonoDelayElement<>(this, delay.toMillis(), TimeUnit.MILLISECONDS, timer));
+		return onAssembly(new MonoDelayElement<>(this, delay.toNanos(), TimeUnit.NANOSECONDS, timer));
 	}
 
 	/**
@@ -2162,11 +2237,13 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doAfterSuccessOrError.svg" alt="">
+	 * <p>
+	 * The relevant signal is propagated downstream, then the {@link BiConsumer} is executed.
 	 *
 	 * @param afterSuccessOrError the callback to call after {@link Subscriber#onNext}, {@link Subscriber#onComplete} without preceding {@link Subscriber#onNext} or {@link Subscriber#onError}
 	 *
 	 * @return a new {@link Mono}
-	 * @deprecated prefer using {@link #doAfterTerminate(Runnable)} or {@link #doFinally(Consumer)}. will be removed in 3.4.0
+	 * @deprecated prefer using {@link #doAfterTerminate(Runnable)} or {@link #doFinally(Consumer)}. will be removed in 3.5.0
 	 */
 	@Deprecated
 	public final Mono<T> doAfterSuccessOrError(BiConsumer<? super T, Throwable> afterSuccessOrError) {
@@ -2178,10 +2255,12 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * completing downstream successfully or with an error.
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doAfterTerminateForMono.svg" alt="">
+	 * <p>
+	 * The relevant signal is propagated downstream, then the {@link Runnable} is executed.
 	 *
 	 * @param afterTerminate the callback to call after {@link Subscriber#onComplete} or {@link Subscriber#onError}
 	 *
-	 * @return an observed  {@link Flux}
+	 * @return an observed  {@link Mono}
 	 */
 	public final Mono<T> doAfterTerminate(Runnable afterTerminate) {
 		Objects.requireNonNull(afterTerminate, "afterTerminate");
@@ -2257,10 +2336,11 @@ public abstract class Mono<T> implements CorePublisher<T> {
 
 	/**
 	 * Add behavior triggered when the {@link Mono} is cancelled.
-	 *
-	 *
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnCancelForMono.svg" alt="">
+	 * <p>
+	 * The handler is executed first, then the cancel signal is propagated upstream
+	 * to the source.
 	 *
 	 * @param onCancel the callback to call on {@link Subscription#cancel()}
 	 *
@@ -2272,10 +2352,10 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * Modify the behavior of the <i>whole chain</i> of operators upstream of this one to
+	 * Potentially modify the behavior of the <i>whole chain</i> of operators upstream of this one to
 	 * conditionally clean up elements that get <i>discarded</i> by these operators.
 	 * <p>
-	 * The {@code discardHook} must be idempotent and safe to use on any instance of the desired
+	 * The {@code discardHook} MUST be idempotent and safe to use on any instance of the desired
 	 * type.
 	 * Calls to this method are additive, and the order of invocation of the {@code discardHook}
 	 * is the same as the order of declaration (calling {@code .filter(...).doOnDiscard(first).doOnDiscard(second)}
@@ -2286,7 +2366,8 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *     <li>filtering operators, dropping some source elements as part of their designed behavior</li>
 	 *     <li>operators that prefetch a few elements and keep them around pending a request, but get cancelled/in error</li>
 	 * </ul>
-	 * These operators are identified in the javadoc by the presence of an {@code onDiscard Support} section.
+	 * WARNING: Not all operators support this instruction. The ones that do are identified in the javadoc by
+	 * the presence of a <strong>Discard Support</strong> section.
 	 *
 	 * @param type the {@link Class} of elements in the upstream chain of operators that
 	 * this cleanup hook should take into account.
@@ -2303,6 +2384,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnNextForMono.svg" alt="">
+	 * <p>
+	 * The {@link Consumer} is executed first, then the onNext signal is propagated
+	 * downstream.
 	 *
 	 * @param onNext the callback to call on {@link Subscriber#onNext}
 	 *
@@ -2314,15 +2398,18 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * Add behavior triggered when the {@link Mono} completes successfully.
+	 * Add behavior triggered as soon as the {@link Mono} can be considered to have completed successfully.
+	 * The value passed to the {@link Consumer} reflects the type of completion:
 	 *
 	 * <ul>
-	 *     <li>null : completed without data</li>
-	 *     <li>T: completed with data</li>
+	 *     <li>null : completed without data. handler is executed right before onComplete is propagated downstream</li>
+	 *     <li>T: completed with data. handler is executed right before onNext is propagated downstream</li>
 	 * </ul>
 	 *
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnSuccess.svg" alt="">
+	 * <p>
+	 * The {@link Consumer} is executed before propagating either onNext or onComplete downstream.
 	 *
 	 * @param onSuccess the callback to call on, argument is null if the {@link Mono}
 	 * completes without data
@@ -2343,6 +2430,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * These {@link Signal} have a {@link Context} associated to them.
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnEachForMono.svg" alt="">
+	 * <p>
+	 * The {@link Consumer} is executed first, then the relevant signal is propagated
+	 * downstream.
 	 *
 	 * @param signalConsumer the mandatory callback to call on
 	 *   {@link Subscriber#onNext(Object)}, {@link Subscriber#onError(Throwable)} and
@@ -2367,6 +2457,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnErrorForMono.svg" alt="">
+	 * <p>
+	 * The {@link Consumer} is executed first, then the onError signal is propagated
+	 * downstream.
 	 *
 	 * @param onError the error callback to call on {@link Subscriber#onError(Throwable)}
 	 *
@@ -2382,6 +2475,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * Add behavior triggered when the {@link Mono} completes with an error matching the given exception type.
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnErrorWithClassPredicateForMono.svg" alt="">
+	 * <p>
+	 * The {@link Consumer} is executed first, then the onError signal is propagated
+	 * downstream.
 	 *
 	 * @param exceptionType the type of exceptions to handle
 	 * @param onError the error handler for relevant errors
@@ -2405,6 +2501,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * Add behavior triggered when the {@link Mono} completes with an error matching the given predicate.
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnErrorWithPredicateForMono.svg" alt="">
+	 * <p>
+	 * The {@link Consumer} is executed first, then the onError signal is propagated
+	 * downstream.
 	 *
 	 * @param predicate the matcher for exceptions to handle
 	 * @param onError the error handler for relevant error
@@ -2430,6 +2529,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnRequestForMono.svg" alt="">
+	 * <p>
+	 * The {@link LongConsumer} is executed first, then the request signal is propagated
+	 * upstream to the parent.
 	 *
 	 * @param consumer the consumer to invoke on each request
 	 *
@@ -2441,9 +2543,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * Add behavior (side-effect) triggered when the {@link Mono} is done being subscribed,
+	 * Add behavior (side-effect) triggered when the {@link Mono} is being subscribed,
 	 * that is to say when a {@link Subscription} has been produced by the {@link Publisher}
-	 * and passed to the {@link Subscriber#onSubscribe(Subscription)}.
+	 * and is being passed to the {@link Subscriber#onSubscribe(Subscription)}.
 	 * <p>
 	 * This method is <strong>not</strong> intended for capturing the subscription and calling its methods,
 	 * but for side effects like monitoring. For instance, the correct way to cancel a subscription is
@@ -2451,6 +2553,9 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnSubscribe.svg" alt="">
 	 * <p>
+	 * The {@link Consumer} is executed first, then the {@link Subscription} is propagated
+	 * downstream to the next subscriber in the chain that is being established.
+	 *
 	 * @param onSubscribe the callback to call on {@link Subscriber#onSubscribe(Subscription)}
 	 *
 	 * @return a new {@link Mono}
@@ -2462,21 +2567,24 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * Add behavior triggered when the {@link Mono} terminates, either by completing successfully or with an error.
-	 *
+	 * Add behavior triggered when the {@link Mono} terminates, either by emitting a value,
+	 * completing empty or failing with an error.
+	 * The value passed to the {@link Consumer} reflects the type of completion:
 	 * <ul>
-	 *     <li>null, null : completing without data</li>
-	 *     <li>T, null : completing with data</li>
-	 *     <li>null, Throwable : failing with/without data</li>
+	 *     <li>null, null : completing without data. handler is executed right before onComplete is propagated downstream</li>
+	 *     <li>T, null : completing with data. handler is executed right before onNext is propagated downstream</li>
+	 *     <li>null, Throwable : failing. handler is executed right before onError is propagated downstream</li>
 	 * </ul>
 	 *
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/doOnSuccessOrError.svg" alt="">
+	 * <p>
+	 * The {@link BiConsumer} is executed before propagating either onNext, onComplete or onError downstream.
 	 *
 	 * @param onSuccessOrError the callback to call {@link Subscriber#onNext}, {@link Subscriber#onComplete} without preceding {@link Subscriber#onNext} or {@link Subscriber#onError}
 	 *
 	 * @return a new {@link Mono}
-	 * @deprecated prefer using {@link #doOnNext(Consumer)}, {@link #doOnError(Consumer)}, {@link #doOnTerminate(Runnable)} or {@link #doOnSuccess(Consumer)}. will be removed in 3.4.0
+	 * @deprecated prefer using {@link #doOnNext(Consumer)}, {@link #doOnError(Consumer)}, {@link #doOnTerminate(Runnable)} or {@link #doOnSuccess(Consumer)}. will be removed in 3.5.0
 	 */
 	@Deprecated
 	public final Mono<T> doOnSuccessOrError(BiConsumer<? super T, Throwable> onSuccessOrError) {
@@ -2486,12 +2594,14 @@ public abstract class Mono<T> implements CorePublisher<T> {
 
 	/**
 	 * Add behavior triggered when the {@link Mono} terminates, either by completing with a value,
-	 * completing empty or completing with an error. Unlike in {@link Flux#doOnTerminate(Runnable)},
+	 * completing empty or failing with an error. Unlike in {@link Flux#doOnTerminate(Runnable)},
 	 * the simple fact that a {@link Mono} emits {@link Subscriber#onNext(Object) onNext} implies
 	 * completion, so the handler is invoked BEFORE the element is propagated (same as with {@link #doOnSuccess(Consumer)}).
 	 *
 	 * <p>
-	 * <img class="marble" src="doc-files/marbles/doOnTerminateForMono.svg" alt="">
+	 * <img class="marble" src="doc-files/marbles/doOnTerminateForMono.svg" alt=""><p>
+	 * The {@link Runnable} is executed first, then the onNext/onComplete/onError signal is propagated
+	 * downstream.
 	 *
 	 * @param onTerminate the callback to call {@link Subscriber#onNext}, {@link Subscriber#onComplete} without preceding {@link Subscriber#onNext} or {@link Subscriber#onError}
 	 *
@@ -2511,6 +2621,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/elapsedForMono.svg" alt="">
 	 *
 	 * @return a new {@link Mono} that emits a tuple of time elapsed in milliseconds and matching data
+	 * @see #timed()
 	 */
 	public final Mono<Tuple2<Long, T>> elapsed() {
 		return elapsed(Schedulers.parallel());
@@ -2526,6 +2637,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *
 	 * @param scheduler a {@link Scheduler} instance to read time from
 	 * @return a new {@link Mono} that emits a tuple of time elapsed in milliseconds and matching data
+	 * @see #timed(Scheduler)
 	 */
 	public final Mono<Tuple2<Long, T>> elapsed(Scheduler scheduler) {
 		Objects.requireNonNull(scheduler, "scheduler");
@@ -2693,7 +2805,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/filterForMono.svg" alt="">
 	 *
-	 * @reactor.discard This operator discards the element if it does not match the filter. It
+	 * <p><strong>Discard Support:</strong> This operator discards the element if it does not match the filter. It
 	 * also discards upon cancellation or error triggered by a data signal.
 	 *
 	 * @param tester the predicate to evaluate
@@ -2719,7 +2831,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/filterWhenForMono.svg" alt="">
 	 *
-	 * @reactor.discard This operator discards the element if it does not match the filter. It
+	 * <p><strong>Discard Support:</strong> This operator discards the element if it does not match the filter. It
 	 * also discards upon cancellation or error triggered by a data signal.
 	 *
 	 * @param asyncPredicate the function generating a {@link Publisher} of {@link Boolean}
@@ -2801,7 +2913,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * calls per iterable. This second invocation is skipped on a {@link Collection } however, a type which is
 	 * assumed to be always finite.
 	 *
-	 * @reactor.discard Upon cancellation, this operator discards {@code T} elements it prefetched and, in
+	 * <p><strong>Discard Support:</strong> Upon cancellation, this operator discards {@code T} elements it prefetched and, in
 	 * some cases, attempts to discard remainder of the currently processed {@link Iterable} (if it can
 	 * safely ensure the iterator is finite). Note that this means each {@link Iterable}'s {@link Iterable#iterator()}
 	 * method could be invoked twice.
@@ -2863,7 +2975,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 
 	/**
 	 * Hides the identity of this {@link Mono} instance.
-	 * 
+	 *
 	 * <p>The main purpose of this operator is to prevent certain identity-based
 	 * optimizations from happening, mostly for diagnostic purposes.
 	 *
@@ -2872,7 +2984,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	public final Mono<T> hide() {
 	    return onAssembly(new MonoHide<>(this));
 	}
-	
+
 	/**
 	 * Ignores onNext signal (dropping it) and only propagates termination events.
 	 *
@@ -2880,7 +2992,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/ignoreElementForMono.svg" alt="">
 	 * <p>
 	 *
-	 * @reactor.discard This operator discards the source element.
+	 * <p><strong>Discard Support:</strong> This operator discards the source element.
 	 *
 	 * @return a new empty {@link Mono} representing the completion of this {@link Mono}.
 	 */
@@ -3094,8 +3206,19 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * Metrics are gathered on {@link Subscriber} events, and it is recommended to also
 	 * {@link #name(String) name} (and optionally {@link #tag(String, String) tag}) the
 	 * sequence.
+	 * <p>
+	 * The name serves as a prefix in the reported metrics names. In case no name has been provided, the default name "reactor" will be applied.
+	 * <p>
+	 * The {@link MeterRegistry} used by reactor can be configured via
+	 * {@link reactor.util.Metrics.MicrometerConfiguration#useRegistry(MeterRegistry)}
+	 * prior to using this operator, the default being
+	 * {@link io.micrometer.core.instrument.Metrics#globalRegistry}.
+	 * </p>
 	 *
 	 * @return an instrumented {@link Mono}
+	 *
+	 * @see #name(String)
+	 * @see #tag(String, String)
 	 */
 	public final Mono<T> metrics() {
 		if (!Metrics.isInstrumentationAvailable()) {
@@ -3111,9 +3234,15 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	/**
 	 * Give a name to this sequence, which can be retrieved using {@link Scannable#name()}
 	 * as long as this is the first reachable {@link Scannable#parents()}.
+	 * <p>
+	 * If {@link #metrics()} operator is called later in the chain, this name will be used as a prefix for meters' name.
 	 *
 	 * @param name a name for the sequence
+	 *
 	 * @return the same sequence, but bearing a name
+	 *
+	 * @see #metrics()
+	 * @see #tag(String, String)
 	 */
 	public final Mono<T> name(String name) {
 		return MonoName.createOrAppend(this, name);
@@ -3128,17 +3257,17 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param other the racing other {@link Mono} to compete with for the signal
 	 *
 	 * @return a new {@link Mono}
-	 * @see #first
+	 * @see #firstWithSignal
 	 */
 	public final Mono<T> or(Mono<? extends T> other) {
-		if (this instanceof MonoFirst) {
-			MonoFirst<T> a = (MonoFirst<T>) this;
+		if (this instanceof MonoFirstWithSignal) {
+			MonoFirstWithSignal<T> a = (MonoFirstWithSignal<T>) this;
 			Mono<T> result =  a.orAdditionalSource(other);
 			if (result != null) {
 				return result;
 			}
 		}
-		return first(this, other);
+		return firstWithSignal(this, other);
 	}
 
 	/**
@@ -3166,7 +3295,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * in place of the original error, which is added as a suppressed exception to the new one.
 	 * <p>
 	 * Note that this error handling mode is not necessarily implemented by all operators
-	 * (look for the {@code Error Mode Support} javadoc section to find operators that
+	 * (look for the <strong>Error Mode Support</strong> javadoc section to find operators that
 	 * support it).
 	 *
 	 * @param errorConsumer a {@link BiConsumer} fed with errors matching the {@link Class}
@@ -3190,7 +3319,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * in place of the original error, which is added as a suppressed exception to the new one.
 	 * <p>
 	 * Note that this error handling mode is not necessarily implemented by all operators
-	 * (look for the {@code Error Mode Support} javadoc section to find operators that
+	 * (look for the <strong>Error Mode Support</strong> javadoc section to find operators that
 	 * support it). In particular, this operator is offered on {@link Mono} mainly as a
 	 * way to propagate the configuration to upstream {@link Flux}. The mode doesn't really
 	 * make sense on a {@link Mono}, since we're sure there will be no further value to
@@ -3215,7 +3344,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * in place of the original error, which is added as a suppressed exception to the new one.
 	 * <p>
 	 * Note that this error handling mode is not necessarily implemented by all operators
-	 * (look for the {@code Error Mode Support} javadoc section to find operators that
+	 * (look for the <strong>Error Mode Support</strong> javadoc section to find operators that
 	 * support it). In particular, this operator is offered on {@link Mono} mainly as a
 	 * way to propagate the configuration to upstream {@link Flux}. The mode doesn't really
 	 * make sense on a {@link Mono}, since we're sure there will be no further value to
@@ -3604,23 +3733,16 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * as long as the companion {@link Publisher} produces an onNext signal and the maximum number of repeats isn't exceeded.
 	 */
 	public final Mono<T> repeatWhenEmpty(int maxRepeat, Function<Flux<Long>, ? extends Publisher<?>> repeatFactory) {
-		return Mono.defer(() -> {
-			Flux<Long> iterations;
-
-			if(maxRepeat == Integer.MAX_VALUE) {
-				iterations = Flux.fromStream(LongStream.range(0, Long.MAX_VALUE).boxed());
+		return Mono.defer(() -> this.repeatWhen(o -> {
+			if (maxRepeat == Integer.MAX_VALUE) {
+				return repeatFactory.apply(o.index().map(Tuple2::getT1));
 			}
 			else {
-				iterations = Flux
-					.range(0, maxRepeat)
-					.map(Integer::longValue)
-					.concatWith(Flux.error(new IllegalStateException("Exceeded maximum number of repeats"), true));
+				return repeatFactory.apply(o.index().map(Tuple2::getT1)
+						.take(maxRepeat)
+						.concatWith(Flux.error(() -> new IllegalStateException("Exceeded maximum number of repeats"))));
 			}
-
-			return this.repeatWhen(o -> repeatFactory.apply(o
-						.zipWith(iterations, 1, (c, i) -> i)))
-			           .next();
-		});
+		}).next());
 	}
 
 
@@ -3652,91 +3774,6 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * Re-subscribes to this {@link Mono} sequence if it signals any error
-	 * that matches the given {@link Predicate}, otherwise push the error downstream.
-	 *
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/retryWithPredicateForMono.svg" alt="">
-	 *
-	 * @param retryMatcher the predicate to evaluate if retry should occur based on a given error signal
-	 *
-	 * @return a {@link Mono} that retries on onError if the predicates matches.
-	 * @deprecated use {@link #retryWhen(Retry)} instead, to be removed in 3.4
-	 */
-	@Deprecated
-	public final Mono<T> retry(Predicate<? super Throwable> retryMatcher) {
-		return onAssembly(new MonoRetryPredicate<>(this, retryMatcher));
-	}
-
-	/**
-	 * Re-subscribes to this {@link Mono} sequence up to the specified number of retries if it signals any
-	 * error that match the given {@link Predicate}, otherwise push the error downstream.
-	 *
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/retryWithAttemptsAndPredicateForMono.svg" alt="">
-	 *
-	 * @param numRetries the number of times to tolerate an error
-	 * @param retryMatcher the predicate to evaluate if retry should occur based on a given error signal
-	 *
-	 * @return a {@link Mono} that retries on onError up to the specified number of retry
-	 * attempts, only if the predicate matches.
-	 * @deprecated use {@link #retryWhen(Retry)} instead, to be removed in 3.4
-	 */
-	@Deprecated
-	public final Mono<T> retry(long numRetries, Predicate<? super Throwable> retryMatcher) {
-		return defer(() -> retry(Flux.countingPredicate(retryMatcher, numRetries)));
-	}
-
-	/**
-	 * Retries this {@link Mono} when a companion sequence signals
-	 * an item in response to this {@link Mono} error signal
-	 * <p>If the companion sequence signals when the {@link Mono} is active, the retry
-	 * attempt is suppressed and any terminal signal will terminate the {@link Mono} source with the same signal
-	 * immediately.
-	 *
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/retryWhenForMono.svg" alt="">
-	 * <p>
-	 * Note that if the companion {@link Publisher} created by the {@code whenFactory}
-	 * emits {@link Context} as trigger objects, the content of these Context will be added
-	 * to the operator's own {@link Context}:
-	 * <blockquote>
-	 * <pre>
-	 * {@code
-	 * Function<Flux<Throwable>, Publisher<?>> customFunction = errorCurrentAttempt -> errorCurrentAttempt.handle((lastError, sink) -> {
-	 * 	    Context ctx = sink.currentContext();
-	 * 	    int rl = ctx.getOrDefault("retriesLeft", 0);
-	 * 	    if (rl > 0) {
-	 *		    sink.next(Context.of(
-	 *		        "retriesLeft", rl - 1,
-	 *		        "lastError", lastError
-	 *		    ));
-	 * 	    } else {
-	 * 	        sink.error(Exceptions.retryExhausted("retries exhausted", lastError));
-	 * 	    }
-	 * });
-	 * Mono<T> retried = originalMono.retryWhen(customFunction);
-	 * }</pre>
-	 * </blockquote>
-	 *
-	 * @param whenFactory the {@link Function} that returns the associated {@link Publisher}
-	 * companion, given a {@link Flux} that signals each onError as a {@link Throwable}.
-	 *
-	 * @return a {@link Mono} that retries on onError when the companion {@link Publisher} produces an
-	 * onNext signal
-	 * @deprecated use {@link #retryWhen(Retry)} instead, to be removed in 3.4. Lambda Functions that don't make
-	 * use of the error can simply be converted by wrapping via {@link Retry#from(Function)}.
-	 * Functions that do use the error will additionally need to map the {@link reactor.util.retry.Retry.RetrySignal}
-	 * emitted by the companion to its {@link Retry.RetrySignal#failure()}.
-	 */
-	@Deprecated
-	public final Mono<T> retryWhen(Function<Flux<Throwable>, ? extends Publisher<?>> whenFactory) {
-		Objects.requireNonNull(whenFactory, "whenFactory");
-		return onAssembly(new MonoRetryWhen<>(this, Retry.from(rws -> whenFactory.apply(rws.map(
-				Retry.RetrySignal::failure)))));
-	}
-
-	/**
 	 * Retries this {@link Mono} in response to signals emitted by a companion {@link Publisher}.
 	 * The companion is generated by the provided {@link Retry} instance, see {@link Retry#max(long)}, {@link Retry#maxInARow(long)}
 	 * and {@link Retry#backoff(long, Duration)} for readily available strategy builders.
@@ -3751,11 +3788,11 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/retryWhenSpecForMono.svg" alt="">
 	 * <p>
-	 * Note that the {@link Retry.RetrySignal} state can be transient and change between each source
+	 * Note that the {@link reactor.util.retry.Retry.RetrySignal} state can be transient and change between each source
 	 * {@link org.reactivestreams.Subscriber#onError(Throwable) onError} or
 	 * {@link org.reactivestreams.Subscriber#onNext(Object) onNext}. If processed with a delay,
 	 * this could lead to the represented state being out of sync with the state at which the retry
-	 * was evaluated. Map it to {@link Retry.RetrySignal#copy()} right away to mediate this.
+	 * was evaluated. Map it to {@link reactor.util.retry.Retry.RetrySignal#copy()} right away to mediate this.
 	 * <p>
 	 * Note that if the companion {@link Publisher} created by the {@code whenFactory}
 	 * emits {@link Context} as trigger objects, these {@link Context} will be merged with
@@ -3792,205 +3829,25 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * In case of error, retry this {@link Mono} up to {@code numRetries} times using a
-	 * randomized exponential backoff strategy (jitter). The jitter factor is {@code 50%}
-	 * but the effective backoff delay cannot be less than {@code firstBackoff}.
+	 * Prepare a {@link Mono} which shares this {@link Mono} result similar to {@link Flux#shareNext()}.
+	 * This will effectively turn this {@link Mono} into a hot task when the first
+	 * {@link Subscriber} subscribes using {@link #subscribe} API. Further {@link Subscriber} will share the same {@link Subscription}
+	 * and therefore the same result.
+	 * It's worth noting this is an un-cancellable {@link Subscription}.
 	 * <p>
-	 * The randomized exponential backoff is good at preventing two typical issues with
-	 * other simpler backoff strategies, namely:
-	 * <ul>
-	 *     <li>
-	 *      having an exponentially growing backoff delay with a small initial delay gives
-	 *      the best tradeoff between not overwhelming the server and serving the client as
-	 *      fast as possible
-	 *     </li>
-	 *     <li>
-	 *      having a jitter, or randomized backoff delay, is beneficial in avoiding "retry-storms"
-	 *      where eg. numerous clients would hit the server at the same time, causing it to
-	 *      display transient failures which would cause all clients to retry at the same
-	 *      backoff times, ultimately sparing no load on the server.
-	 *     </li>
-	 * </ul>
+	 * <img class="marble" src="doc-files/marbles/shareForMono.svg" alt="">
 	 *
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/retryBackoffForMono.svg" alt="">
-	 *
-	 * @param numRetries the maximum number of attempts before an {@link IllegalStateException}
-	 * is raised (having the original retry-triggering exception as cause).
-	 * @param firstBackoff the first backoff delay to apply then grow exponentially. Also
-	 * minimum delay even taking jitter into account.
-	 * @return a {@link Mono} that retries on onError with exponentially growing randomized delays between retries.
-	 * @deprecated use {@link #retryWhen(Retry)} with a {@link Retry#backoff(long, Duration)} base, to be removed in 3.4
+	 * @return a new {@link Mono}
 	 */
-	@Deprecated
-	public final Mono<T> retryBackoff(long numRetries, Duration firstBackoff) {
-		return retryWhen(Retry.backoff(numRetries, firstBackoff));
-	}
+	public final Mono<T> share() {
+		if (this instanceof Fuseable.ScalarCallable) {
+			return this;
+		}
 
-	/**
-	 * In case of error, retry this {@link Mono} up to {@code numRetries} times using a
-	 * randomized exponential backoff strategy. The jitter factor is {@code 50%}
-	 * but the effective backoff delay cannot be less than {@code firstBackoff} nor more
-	 * than {@code maxBackoff}.
-	 * <p>
-	 * The randomized exponential backoff is good at preventing two typical issues with
-	 * other simpler backoff strategies, namely:
-	 * <ul>
-	 *     <li>
-	 *      having an exponentially growing backoff delay with a small initial delay gives
-	 *      the best tradeoff between not overwhelming the server and serving the client as
-	 *      fast as possible
-	 *     </li>
-	 *     <li>
-	 *      having a jitter, or randomized backoff delay, is beneficial in avoiding "retry-storms"
-	 *      where eg. numerous clients would hit the server at the same time, causing it to
-	 *      display transient failures which would cause all clients to retry at the same
-	 *      backoff times, ultimately sparing no load on the server.
-	 *     </li>
-	 * </ul>
-	 *
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/retryBackoffForMono.svg" alt="">
-	 *
-	 * @param numRetries the maximum number of attempts before an {@link IllegalStateException}
-	 * is raised (having the original retry-triggering exception as cause).
-	 * @param firstBackoff the first backoff delay to apply then grow exponentially. Also
-	 * minimum delay even taking jitter into account.
-	 * @param maxBackoff the maximum delay to apply despite exponential growth and jitter.
-	 * @return a {@link Mono} that retries on onError with exponentially growing randomized delays between retries.
-	 * @deprecated use {@link #retryWhen(Retry)} with a {@link Retry#backoff(long, Duration)} base, to be removed in 3.4
-	 */
-	@Deprecated
-	public final Mono<T> retryBackoff(long numRetries, Duration firstBackoff, Duration maxBackoff) {
-		return retryBackoff(numRetries, firstBackoff, maxBackoff, 0.5d);
-	}
-
-	/**
-	 * In case of error, retry this {@link Mono} up to {@code numRetries} times using a
-	 * randomized exponential backoff strategy. The jitter factor is {@code 50%}
-	 * but the effective backoff delay cannot be less than {@code firstBackoff} nor more
-	 * than {@code maxBackoff}. The delays and subsequent attempts are materialized on the
-	 * provided backoff {@link Scheduler} (see {@link Mono#delay(Duration, Scheduler)}).
-	 <p>
-	 * The randomized exponential backoff is good at preventing two typical issues with
-	 * other simpler backoff strategies, namely:
-	 * <ul>
-	 *     <li>
-	 *      having an exponentially growing backoff delay with a small initial delay gives
-	 *      the best tradeoff between not overwhelming the server and serving the client as
-	 *      fast as possible
-	 *     </li>
-	 *     <li>
-	 *      having a jitter, or randomized backoff delay, is beneficial in avoiding "retry-storms"
-	 *      where eg. numerous clients would hit the server at the same time, causing it to
-	 *      display transient failures which would cause all clients to retry at the same
-	 *      backoff times, ultimately sparing no load on the server.
-	 *     </li>
-	 * </ul>
-	 *
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/retryBackoffForFlux.svg" alt="">
-	 *
-	 * @param numRetries the maximum number of attempts before an {@link IllegalStateException}
-	 * is raised (having the original retry-triggering exception as cause).
-	 * @param firstBackoff the first backoff delay to apply then grow exponentially. Also
-	 * minimum delay even taking jitter into account.
-	 * @param maxBackoff the maximum delay to apply despite exponential growth and jitter.
-	 * @param backoffScheduler the {@link Scheduler} on which the delays and subsequent attempts are executed.
-	 * @return a {@link Mono} that retries on onError with exponentially growing randomized delays between retries.
-	 * @deprecated use {@link #retryWhen(Retry)} with a {@link Retry#backoff(long, Duration)} base, to be removed in 3.4
-	 */
-	@Deprecated
-	public final Mono<T> retryBackoff(long numRetries, Duration firstBackoff, Duration maxBackoff, Scheduler backoffScheduler) {
-		return retryBackoff(numRetries, firstBackoff, maxBackoff, 0.5d, backoffScheduler);
-	}
-
-	/**
-	 * In case of error, retry this {@link Mono} up to {@code numRetries} times using a
-	 * randomized exponential backoff strategy, randomized with a user-provided jitter
-	 * factor between {@code 0.d} (no jitter) and {@code 1.0} (default is {@code 0.5}).
-	 * Even with the jitter, the effective backoff delay cannot be less than
-	 * {@code firstBackoff} nor more than {@code maxBackoff}.
-	 * <p>
-	 * The randomized exponential backoff is good at preventing two typical issues with
-	 * other simpler backoff strategies, namely:
-	 * <ul>
-	 *     <li>
-	 *      having an exponentially growing backoff delay with a small initial delay gives
-	 *      the best tradeoff between not overwhelming the server and serving the client as
-	 *      fast as possible
-	 *     </li>
-	 *     <li>
-	 *      having a jitter, or randomized backoff delay, is beneficial in avoiding "retry-storms"
-	 *      where eg. numerous clients would hit the server at the same time, causing it to
-	 *      display transient failures which would cause all clients to retry at the same
-	 *      backoff times, ultimately sparing no load on the server.
-	 *     </li>
-	 * </ul>
-	 *
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/retryBackoffForMono.svg" alt="">
-	 *
-	 * @param numRetries the maximum number of attempts before an {@link IllegalStateException}
-	 * is raised (having the original retry-triggering exception as cause).
-	 * @param firstBackoff the first backoff delay to apply then grow exponentially. Also
-	 * minimum delay even taking jitter into account.
-	 * @param maxBackoff the maximum delay to apply despite exponential growth and jitter.
-	 * @param jitterFactor the jitter percentage (as a double between 0.0 and 1.0).
-	 * @return a {@link Mono} that retries on onError with exponentially growing randomized delays between retries.
-	 * @deprecated use {@link #retryWhen(Retry)} with a {@link Retry#backoff(long, Duration)} base, to be removed in 3.4
-	 */
-	@Deprecated
-	public final Mono<T> retryBackoff(long numRetries, Duration firstBackoff, Duration maxBackoff, double jitterFactor) {
-		return retryBackoff(numRetries, firstBackoff, maxBackoff, jitterFactor, Schedulers.parallel());
-	}
-
-	/**
-	 * In case of error, retry this {@link Mono} up to {@code numRetries} times using a
-	 * randomized exponential backoff strategy, randomized with a user-provided jitter
-	 * factor between {@code 0.d} (no jitter) and {@code 1.0} (default is {@code 0.5}).
-	 * Even with the jitter, the effective backoff delay cannot be less than
-	 * {@code firstBackoff} nor more than {@code maxBackoff}. The delays and subsequent
-	 * attempts are executed on the provided backoff {@link Scheduler} (see
-	 * {@link Mono#delay(Duration, Scheduler)}).
-	 <p>
-	 * The randomized exponential backoff is good at preventing two typical issues with
-	 * other simpler backoff strategies, namely:
-	 * <ul>
-	 *     <li>
-	 *      having an exponentially growing backoff delay with a small initial delay gives
-	 *      the best tradeoff between not overwhelming the server and serving the client as
-	 *      fast as possible
-	 *     </li>
-	 *     <li>
-	 *      having a jitter, or randomized backoff delay, is beneficial in avoiding "retry-storms"
-	 *      where eg. numerous clients would hit the server at the same time, causing it to
-	 *      display transient failures which would cause all clients to retry at the same
-	 *      backoff times, ultimately sparing no load on the server.
-	 *     </li>
-	 * </ul>
-	 *
-	 * <p>
-	 * <img class="marble" src="doc-files/marbles/retryBackoffForFlux.svg" alt="">
-	 *
-	 * @param numRetries the maximum number of attempts before an {@link IllegalStateException}
-	 * is raised (having the original retry-triggering exception as cause).
-	 * @param firstBackoff the first backoff delay to apply then grow exponentially. Also
-	 * minimum delay even taking jitter into account.
-	 * @param maxBackoff the maximum delay to apply despite exponential growth and jitter.
-	 * @param backoffScheduler the {@link Scheduler} on which the delays and subsequent attempts are executed.
-	 * @param jitterFactor the jitter percentage (as a double between 0.0 and 1.0).
-	 * @return a {@link Mono} that retries on onError with exponentially growing randomized delays between retries.
-	 * @deprecated use {@link #retryWhen(Retry)} with a {@link Retry#backoff(long, Duration)} base, to be removed in 3.4
-	 */
-	@Deprecated
-	public final Mono<T> retryBackoff(long numRetries, Duration firstBackoff, Duration maxBackoff, double jitterFactor, Scheduler backoffScheduler) {
-		return retryWhen(Retry
-				.backoff(numRetries, firstBackoff)
-				.maxBackoff(maxBackoff)
-				.jitter(jitterFactor)
-				.scheduler(backoffScheduler)
-				.transientErrors(false));
+		if (this instanceof NextProcessor) { //TODO should we check whether the NextProcessor has a source or not?
+			return this;
+		}
+		return new NextProcessor<>(this);
 	}
 
 	/**
@@ -4041,14 +3898,14 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @return a new {@link Disposable} that can be used to cancel the underlying {@link Subscription}
 	 */
 	public final Disposable subscribe() {
-		if(this instanceof MonoProcessor){
-			MonoProcessor<T> s = (MonoProcessor<T>)this;
-			s.connect();
-			return s;
+		if(this instanceof NextProcessor){
+			NextProcessor<T> s = (NextProcessor<T>)this;
+			if (s.source != null) { //enables `Sinks.one().subscribe()` usecases
+				s.connect();
+				return s;
+			}
 		}
-		else{
-			return subscribeWith(new LambdaMonoSubscriber<>(null, null, null, null, null));
-		}
+		return subscribeWith(new LambdaMonoSubscriber<>(null, null, null, null, null));
 	}
 
 	/**
@@ -4254,9 +4111,11 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *
 	 * @return a contextualized {@link Mono}
 	 * @see Context
+	 * @deprecated Use {@link #contextWrite(ContextView)} instead. To be removed in 3.5.0.
 	 */
+	@Deprecated
 	public final Mono<T> subscriberContext(Context mergeContext) {
-		return subscriberContext(c -> c.putAll(mergeContext));
+		return subscriberContext(c -> c.putAll(mergeContext.readOnly()));
 	}
 
 	/**
@@ -4276,9 +4135,11 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *
 	 * @return a contextualized {@link Mono}
 	 * @see Context
+	 * @deprecated Use {@link #contextWrite(Function)} instead. To be removed in 3.5.0.
 	 */
+	@Deprecated
 	public final Mono<T> subscriberContext(Function<Context, Context> doOnContext) {
-		return new MonoSubscriberContext<>(this, doOnContext);
+		return new MonoContextWrite<>(this, doOnContext);
 	}
 
 	/**
@@ -4295,7 +4156,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 *
 	 * @param scheduler a {@link Scheduler} providing the {@link Worker} where to subscribe
 	 *
-	 * @return a {@link Flux} requesting asynchronously
+	 * @return a {@link Mono} requesting asynchronously
 	 * @see #publishOn(Scheduler)
 	 */
 	public final Mono<T> subscribeOn(Scheduler scheduler) {
@@ -4351,10 +4212,17 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * all tags throughout the publisher chain by using {@link Scannable#tags()} (as
 	 * traversed
 	 * by {@link Scannable#parents()}).
+	 * <p>
+	 * Note that some monitoring systems like Prometheus require to have the exact same set of
+	 * tags for each meter bearing the same name.
 	 *
 	 * @param key a tag key
 	 * @param value a tag value
+	 *
 	 * @return the same sequence, but bearing tags
+	 *
+	 * @see #name(String)
+	 * @see #metrics()
 	 */
 	public final Mono<T> tag(String key, String value) {
 		return MonoName.createOrAppend(this, key, value);
@@ -4421,7 +4289,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/thenForMono.svg" alt="">
 	 *
-	 * @reactor.discard This operator discards the element from the source.
+	 * <p><strong>Discard Support:</strong> This operator discards the element from the source.
 	 *
 	 * @return a {@link Mono} ignoring its payload (actively dropping)
 	 */
@@ -4439,7 +4307,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/thenWithMonoForMono.svg" alt="">
 	 *
-	 * @reactor.discard This operator discards the element from the source.
+	 * <p><strong>Discard Support:</strong> This operator discards the element from the source.
 	 *
 	 * @param other a {@link Mono} to emit from after termination
 	 * @param <V> the element type of the supplied Mono
@@ -4455,13 +4323,13 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * Let this {@link Mono} complete then emit the provided value.
+	 * Let this {@link Mono} complete successfully, then emit the provided value. On an error in the original {@link Mono}, the error signal is propagated instead.
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/thenReturn.svg" alt="">
 	 *
-	 * @reactor.discard This operator discards the element from the source.
+	 * <p><strong>Discard Support:</strong> This operator discards the element from the source.
 	 *
-	 * @param value a value to emit after termination
+	 * @param value a value to emit after successful termination
 	 * @param <V> the element type of the supplied value
 	 *
 	 * @return a new {@link Mono} that emits the supplied value
@@ -4477,7 +4345,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/thenEmptyForMono.svg" alt="">
 	 *
-	 * @reactor.discard This operator discards the element from the source.
+	 * <p><strong>Discard Support:</strong> This operator discards the element from the source.
 	 *
 	 * @param other a {@link Publisher} to wait for after this Mono's termination
 	 * @return a new {@link Mono} completing when both publishers have completed in
@@ -4488,15 +4356,15 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * Let this {@link Mono} complete then play another {@link Publisher}.
+	 * Let this {@link Mono} complete successfully then play another {@link Publisher}. On an error in the original {@link Mono}, the error signal is propagated instead.
 	 * <p>
-	 * In other words ignore element from this mono and transform the completion signal into a
+	 * In other words ignore the element from this mono and transform the completion signal into a
 	 * {@code Flux<V>} that will emit elements from the provided {@link Publisher}.
 	 *
 	 * <p>
 	 * <img class="marble" src="doc-files/marbles/thenManyForMono.svg" alt="">
 	 *
-	 * @reactor.discard This operator discards the element from the source.
+	 * <p><strong>Discard Support:</strong> This operator discards the element from the source.
 	 *
 	 * @param other a {@link Publisher} to emit from after termination
 	 * @param <V> the element type of the supplied Publisher
@@ -4508,6 +4376,63 @@ public abstract class Mono<T> implements CorePublisher<T> {
 		@SuppressWarnings("unchecked")
 		Flux<V> concat = (Flux<V>)Flux.concat(ignoreElement(), other);
 		return Flux.onAssembly(concat);
+	}
+
+
+	/**
+	 * Times this {@link Mono} {@link Subscriber#onNext(Object)} event, encapsulated into a {@link Timed} object
+	 * that lets downstream consumer look at various time information gathered with nanosecond
+	 * resolution using the default clock ({@link Schedulers#parallel()}):
+	 * <ul>
+	 *     <li>{@link Timed#elapsed()}: the time in nanoseconds since subscription, as a {@link Duration}.
+	 *     This is functionally equivalent to {@link #elapsed()}, with a more expressive and precise
+	 *     representation than a {@link Tuple2} with a long.</li>
+	 *     <li>{@link Timed#timestamp()}: the timestamp of this onNext, as an {@link java.time.Instant}
+	 *     (with nanoseconds part). This is functionally equivalent to {@link #timestamp()}, with a more
+	 *     expressive and precise representation than a {@link Tuple2} with a long.</li>
+	 *     <li>{@link Timed#elapsedSinceSubscription()}: for {@link Mono} this is the same as
+	 *     {@link Timed#elapsed()}.</li>
+	 * </ul>
+	 * <p>
+	 * The {@link Timed} object instances are safe to store and use later, as they are created as an
+	 * immutable wrapper around the {@code <T>} value and immediately passed downstream.
+	 * <p>
+	 * <img class="marble" src="doc-files/marbles/timedForMono.svg" alt="">
+	 *
+	 * @return a timed {@link Mono}
+	 * @see #elapsed()
+	 * @see #timestamp()
+	 */
+	public final Mono<Timed<T>> timed() {
+		return this.timed(Schedulers.parallel());
+	}
+
+	 /**
+	 * Times this {@link Mono} {@link Subscriber#onNext(Object)} event, encapsulated into a {@link Timed} object
+	 * that lets downstream consumer look at various time information gathered with nanosecond
+	 * resolution using the provided {@link Scheduler} as a clock:
+	 * <ul>
+	 *     <li>{@link Timed#elapsed()}: the time in nanoseconds since subscription, as a {@link Duration}.
+	 *     This is functionally equivalent to {@link #elapsed()}, with a more expressive and precise
+	  *    representation than a {@link Tuple2} with a long.</li>
+	 *     <li>{@link Timed#timestamp()}: the timestamp of this onNext, as an {@link java.time.Instant}
+	 *     (with nanoseconds part). This is functionally equivalent to {@link #timestamp()}, with a more
+	 *     expressive and precise representation than a {@link Tuple2} with a long.</li>
+	 *     <li>{@link Timed#elapsedSinceSubscription()}: for {@link Mono} this is the same as
+	 *     {@link Timed#elapsed()}.</li>
+	 * </ul>
+	 * <p>
+	 * The {@link Timed} object instances are safe to store and use later, as they are created as an
+	 * immutable wrapper around the {@code <T>} value and immediately passed downstream.
+	 * <p>
+	 * <img class="marble" src="doc-files/marbles/timedForMono.svg" alt="">
+	 *
+	 * @return a timed {@link Mono}
+	 * @see #elapsed(Scheduler)
+	 * @see #timestamp(Scheduler)
+	 */
+	public final Mono<Timed<T>> timed(Scheduler clock) {
+		return onAssembly(new MonoTimed<>(this, clock));
 	}
 
 	/**
@@ -4630,6 +4555,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * <img class="marble" src="doc-files/marbles/timestampForMono.svg" alt="">
 	 *
 	 * @return a timestamped {@link Mono}
+	 * @see #timed()
 	 */
 	public final Mono<Tuple2<Long, T>> timestamp() {
 		return timestamp(Schedulers.parallel());
@@ -4640,11 +4566,17 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * T1 the current clock time in millis (as a {@link Long} measured by the
 	 * provided {@link Scheduler}) and T2 the emitted data (as a {@code T}).
 	 *
+	 * <p>The provider {@link Scheduler} will be asked to {@link Scheduler#now(TimeUnit) provide time}
+	 * with a granularity of {@link TimeUnit#MILLISECONDS}. In order for this operator to work as advertised, the
+	 * provided Scheduler should thus return results that can be interpreted as unix timestamps.</p>
 	 * <p>
+	 *
 	 * <img class="marble" src="doc-files/marbles/timestampForMono.svg" alt="">
 	 *
 	 * @param scheduler a {@link Scheduler} instance to read time from
 	 * @return a timestamped {@link Mono}
+	 * @see Scheduler#now(TimeUnit)
+	 * @see #timed(Scheduler)
 	 */
 	public final Mono<Tuple2<Long, T>> timestamp(Scheduler scheduler) {
 		Objects.requireNonNull(scheduler, "scheduler");
@@ -4670,21 +4602,22 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * is subscribed to its parent source if any.
 	 *
 	 * @return a {@link MonoProcessor} to use to either retrieve value or cancel the underlying {@link Subscription}
+	 * @deprecated prefer {@link #share()} to share a parent subscription, or use {@link Sinks}
 	 */
+	@Deprecated
 	public final MonoProcessor<T> toProcessor() {
-		MonoProcessor<T> result;
 		if (this instanceof MonoProcessor) {
-			result = (MonoProcessor<T>)this;
+			return (MonoProcessor<T>) this;
 		}
 		else {
-			result = new MonoProcessor<>(this);
+			NextProcessor<T> result = new NextProcessor<>(this);
+			result.connect();
+			return result;
 		}
-		result.connect();
-		return result;
 	}
 
 	/**
-	 * Transform this {@link Mono} in order to generate a target {@link Mono}. Unlike {@link #compose(Function)}, the
+	 * Transform this {@link Mono} in order to generate a target {@link Mono}. Unlike {@link #transformDeferred(Function)}, the
 	 * provided function is executed as part of assembly.
 	 *
 	 * <pre>
@@ -4700,7 +4633,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param <V> the item type in the returned {@link Mono}
 	 *
 	 * @return a new {@link Mono}
-	 * @see #transformDeferred(Function) transformDeferred(Function) for deferred composition of {@link Mono} for each {@link Subscriber}
+	 * @see #transformDeferred(Function) transformDeferred(Function) for deferred composition of Mono for each Subscriber
 	 * @see #as(Function) as(Function) for a loose conversion to an arbitrary type
 	 */
 	@SuppressWarnings({"unchecked", "rawtypes"})
@@ -4727,16 +4660,54 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * @param <V> the item type in the returned {@link Publisher}
 	 *
 	 * @return a new {@link Mono}
-	 * @see #as as() for a loose conversion to an arbitrary type
-	 * @see #transform(Function)
+	 * @see #transform(Function) transform(Function) for immmediate transformation of Mono
+	 * @see #transformDeferredContextual(BiFunction) transformDeferredContextual(BiFunction) for a similarly deferred transformation of Mono reading the ContextView
+	 * @see #as(Function) as(Function) for a loose conversion to an arbitrary type
 	 */
-	@SuppressWarnings({"unchecked", "rawtypes"})
 	public final <V> Mono<V> transformDeferred(Function<? super Mono<T>, ? extends Publisher<V>> transformer) {
 		return defer(() -> {
 			if (Hooks.DETECT_CONTEXT_LOSS) {
-				return from(new ContextTrackingFunctionWrapper<T, V>((Function) transformer).apply(this));
+				@SuppressWarnings({"unchecked", "rawtypes"})
+				Mono<V> result = from(new ContextTrackingFunctionWrapper<T, V>((Function) transformer).apply(this));
+				return result;
 			}
 			return from(transformer.apply(this));
+		});
+	}
+
+	/**
+	 * Defer the given transformation to this {@link Mono} in order to generate a
+	 * target {@link Mono} type. A transformation will occur for each
+	 * {@link Subscriber}. In addition, the transforming {@link BiFunction} exposes
+	 * the {@link ContextView} of each {@link Subscriber}. For instance:
+	 *
+	 * <blockquote><pre>
+	 * Mono&lt;T> monoLogged = mono.transformDeferredContextual((original, ctx) -> original.log("for RequestID" + ctx.get("RequestID"))
+	 * //...later subscribe. Each subscriber has its Context with a RequestID entry
+	 * monoLogged.contextWrite(Context.of("RequestID", "requestA").subscribe();
+	 * monoLogged.contextWrite(Context.of("RequestID", "requestB").subscribe();
+	 * </pre></blockquote>
+	 * <p>
+	 * <img class="marble" src="doc-files/marbles/transformDeferredForMono.svg" alt="">
+	 *
+	 * @param transformer the {@link BiFunction} to lazily map this {@link Mono} into a target {@link Mono}
+	 * instance upon subscription, with access to {@link ContextView}
+	 * @param <V> the item type in the returned {@link Publisher}
+	 * @return a new {@link Mono}
+	 * @see #transform(Function) transform(Function) for immmediate transformation of Mono
+	 * @see #transformDeferred(Function) transformDeferred(Function) for a similarly deferred transformation of Mono without the ContextView
+	 * @see #as(Function) as(Function) for a loose conversion to an arbitrary type
+	 */
+	public final <V> Mono<V> transformDeferredContextual(BiFunction<? super Mono<T>, ? super ContextView, ? extends Publisher<V>> transformer) {
+		return deferContextual(ctxView -> {
+			if (Hooks.DETECT_CONTEXT_LOSS) {
+				ContextTrackingFunctionWrapper<T, V> wrapper = new ContextTrackingFunctionWrapper<>(
+						publisher -> transformer.apply(wrap(publisher, false), ctxView),
+						transformer.toString()
+				);
+				return wrap(wrapper.apply(this), true);
+			}
+			return from(transformer.apply(this, ctxView));
 		});
 	}
 
@@ -4851,28 +4822,6 @@ public abstract class Mono<T> implements CorePublisher<T> {
 		return source;
 	}
 
-	/**
-	 * To be used by custom operators: invokes assembly {@link Hooks} pointcut given a
-	 * {@link Mono}, potentially returning a new {@link Mono}. This is for example useful
-	 * to activate cross-cutting concerns at assembly time, eg. a generalized
-	 * {@link #checkpoint()}.
-	 *
-	 * @param <T> the value type
-	 * @param source the source to apply assembly hooks onto
-	 *
-	 * @return the source, potentially wrapped with assembly time cross-cutting behavior
-	 * @deprecated use {@link Operators#onLastAssembly(CorePublisher)}
-	 */
-	@SuppressWarnings("unchecked")
-	@Deprecated
-	protected static <T> Mono<T> onLastAssembly(Mono<T> source) {
-		Function<Publisher, Publisher> hook = Hooks.onLastOperatorHook;
-		if(hook == null) {
-			return source;
-		}
-		return (Mono<T>)Objects.requireNonNull(hook.apply(source), "LastOperator hook returned null");
-	}
-
 	@Override
 	public String toString() {
 		return getClass().getSimpleName();
@@ -4931,9 +4880,8 @@ public abstract class Mono<T> implements CorePublisher<T> {
 		}
 		if (source instanceof FluxSourceMono
 				|| source instanceof FluxSourceMonoFuseable) {
-			FluxFromMonoOperator<T, T> wrapper = (FluxFromMonoOperator<T,T>) source;
 			@SuppressWarnings("unchecked")
-			Mono<T> extracted = (Mono<T>) wrapper.source;
+			Mono<T> extracted = (Mono<T>) ((FluxFromMonoOperator<T,T>) source).source;
 			return extracted;
 		}
 

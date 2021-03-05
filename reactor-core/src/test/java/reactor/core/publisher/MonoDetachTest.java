@@ -21,10 +21,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.awaitility.Awaitility;
 import org.awaitility.Duration;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscriber;
+import reactor.core.Scannable;
 import reactor.test.subscriber.AssertSubscriber;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class MonoDetachTest {
 
@@ -52,7 +54,7 @@ public class MonoDetachTest {
 		System.gc();
 		Thread.sleep(200);
 
-		Assert.assertNull("Object retained!", wr.get());
+		assertThat(wr.get()).as("Object retained!").isNull();
 
 	}
 
@@ -108,7 +110,7 @@ public class MonoDetachTest {
 		System.gc();
 		Thread.sleep(200);
 
-		Assert.assertNull("Object retained!", wr.get());
+		assertThat(wr.get()).as("Object retained!").isNull();
 	}
 
 	@Test
@@ -132,7 +134,7 @@ public class MonoDetachTest {
 			.untilAsserted(() -> {
 				System.gc();
 				Object garbage = new Object();
-				Assert.assertNull("Object retained!", wr.get());
+				assertThat(wr.get()).as("Object retained!").isNull();
 				garbage.toString();
 			});
 	}
@@ -155,5 +157,12 @@ public class MonoDetachTest {
 		ts.assertValues(1);
 		ts.assertComplete();
 		ts.assertNoError();
+	}
+
+	@Test
+	public void scanOperator(){
+	    MonoDetach<Integer> test = new MonoDetach<>(Mono.just(1));
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 }

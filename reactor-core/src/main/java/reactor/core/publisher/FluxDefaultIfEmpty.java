@@ -42,6 +42,12 @@ final class FluxDefaultIfEmpty<T> extends InternalFluxOperator<T, T> {
 		return new DefaultIfEmptySubscriber<>(actual, value);
 	}
 
+	@Override
+	public Object scanUnsafe(Attr key) {
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
+	}
+
 	static final class DefaultIfEmptySubscriber<T>
 			extends Operators.MonoSubscriber<T, T> {
 
@@ -51,13 +57,15 @@ final class FluxDefaultIfEmpty<T> extends InternalFluxOperator<T, T> {
 
 		DefaultIfEmptySubscriber(CoreSubscriber<? super T> actual, T value) {
 			super(actual);
-			this.value = value;
+			//noinspection deprecation
+			this.value = value; //we write once, setValue() is NO-OP
 		}
 
 		@Override
 		@Nullable
 		public Object scanUnsafe(Attr key) {
 			if (key == Attr.PARENT) return s;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 			return super.scanUnsafe(key);
 		}
@@ -97,13 +105,14 @@ final class FluxDefaultIfEmpty<T> extends InternalFluxOperator<T, T> {
 			if (hasValue) {
 				actual.onComplete();
 			} else {
-				complete(value);
+				complete(this.value);
 			}
 		}
 
 		@Override
 		public void setValue(T value) {
-			// value is constant
+			// value is constant. writes from the base class are redundant, and the constant
+			// would always be visible in cancel(), so it will safely be discarded.
 		}
 
 		@Override

@@ -25,10 +25,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
+import reactor.core.Scannable;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.StepVerifierOptions;
@@ -104,7 +106,7 @@ public class MonoExpandTest {
 
 			for (int j = 0; j <= i; j++) {
 				assertThat(list.get(j).intValue())
-						.as(tag + ", " + list)
+						.as("%s, %s", tag, list)
 						.isEqualTo(i - j);
 			}
 		}
@@ -127,7 +129,7 @@ public class MonoExpandTest {
 
 			for (int j = 0; j <= i; j++) {
 				assertThat(list.get(j).intValue())
-						.as(tag + ", " + list)
+						.as("%s, %s", tag, list)
 						.isEqualTo(i - j);
 			}
 		}
@@ -273,7 +275,8 @@ public class MonoExpandTest {
 		);
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void depthFirst() {
 		FluxExpandTest.Node root = createTest();
 
@@ -297,7 +300,7 @@ public class MonoExpandTest {
 
 		StepVerifier.create(Mono.just(root)
 		                        .expandDeep(v -> Flux.fromIterable(v.children)
-		                                         .subscribeOn(Schedulers.elastic()))
+		                                         .subscribeOn(Schedulers.boundedElastic()))
 		                        .map(v -> v.name))
 		            .expectNext(
 				            "root",
@@ -311,7 +314,8 @@ public class MonoExpandTest {
 		            .verify(Duration.ofSeconds(5));
 	}
 
-	@Test(timeout = 5000)
+	@Test
+	@Timeout(5)
 	public void breadthFirst() {
 		FluxExpandTest.Node root = createTest();
 
@@ -333,7 +337,7 @@ public class MonoExpandTest {
 		FluxExpandTest.Node root = createTest();
 
 		StepVerifier.create(Mono.just(root)
-		                        .expand(v -> Flux.fromIterable(v.children).subscribeOn(Schedulers.elastic()))
+		                        .expand(v -> Flux.fromIterable(v.children).subscribeOn(Schedulers.boundedElastic()))
 		                        .map(v -> v.name))
 		            .expectNext(
 				            "root",
@@ -400,7 +404,7 @@ public class MonoExpandTest {
 			Runnable r1 = () -> ts.request(1);
 			Runnable r2 = ts::cancel;
 
-			RaceTestUtils.race(r1, r2, Schedulers.single());
+			RaceTestUtils.race(r1, r2);
 		}
 	}
 
@@ -419,7 +423,7 @@ public class MonoExpandTest {
 			Runnable r1 = () -> pp.next(1);
 			Runnable r2 = ts::cancel;
 
-			RaceTestUtils.race(r1, r2, Schedulers.single());
+			RaceTestUtils.race(r1, r2);
 		}
 	}
 
@@ -437,7 +441,7 @@ public class MonoExpandTest {
 			Runnable r1 = pp::complete;
 			Runnable r2 = ts::cancel;
 
-			RaceTestUtils.race(r1, r2, Schedulers.single());
+			RaceTestUtils.race(r1, r2);
 		}
 	}
 
@@ -520,5 +524,12 @@ public class MonoExpandTest {
 				    .map(n -> n.name))
 		            .expectNextSequence(depthFirstExpected)
 		            .verifyComplete();
+	}
+
+	@Test
+	public void scanOperator(){
+	    MonoExpand<Integer> test = new MonoExpand<>(Mono.just(10), countDown, false, 10);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 }

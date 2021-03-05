@@ -13,22 +13,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 import me.champeau.gradle.japicmp.JapicmpTask
+
+buildscript {
+	repositories {
+		jcenter()
+	}
+
+	dependencies {
+		// when updating this plugin, revisit pinning the version of the jcstress jar near line 356
+		classpath 'com.github.erizo.gradle:jcstress-gradle-plugin:0.8.6'
+	}
+}
 
 apply plugin: 'idea' //needed to avoid IDEA seeing the jmh folder as source
 apply plugin: 'biz.aQute.bnd.builder'
 apply plugin: 'org.unbroken-dome.test-sets'
 apply plugin: 'kotlin'
+apply plugin: 'jcstress'
 
 ext {
 	bndOptions = [
 		"Export-Package": [
 			"!*internal*",
 			"!reactor.blockhound*",
-			"reactor.*"
+			"reactor.*;version=$osgiVersion"
 		].join(","),
 		"Import-Package": [
 			"!javax.annotation",
+			"!javax.annotation.meta",
 			'org.slf4j;resolution:=optional;version="[1.5.4,2)"',
 			"kotlin.*;resolution:=optional",
 			"reactor.blockhound.*;resolution:=optional",
@@ -36,126 +50,134 @@ ext {
 			"*"
 		].join(","),
 		"Bundle-Name" : "reactor-core",
-		"Bundle-SymbolicName" : "io.projectreactor.reactor-core"
+		"Bundle-SymbolicName" : "io.projectreactor.reactor-core",
+		"Bundle-Version" : "$osgiVersion"
 	]
-}
-
-sourceSets {
-	noMicrometerTest {
-		java.srcDir 'src/test/java'
-		resources.srcDir 'src/test/resources'
-	}
 }
 
 testSets {
 	blockHoundTest
+	withMicrometerTest
 }
 
 configurations {
 	compileOnly.extendsFrom jsr166backport
-	testCompile.extendsFrom jsr166backport
-	noMicrometerTestRuntime {
-		extendsFrom testRuntime
-		exclude group:"io.micrometer", module:"micrometer-core"
-	}
+	testCompileOnly.extendsFrom jsr166backport
 }
 
 dependencies {
 	// Reactive Streams
-	compile "org.reactivestreams:reactive-streams:${reactiveStreamsVersion}"
-	testCompile "org.reactivestreams:reactive-streams-tck:${reactiveStreamsVersion}"
+	api "org.reactivestreams:reactive-streams:${reactiveStreamsVersion}"
+	testImplementation ("org.reactivestreams:reactive-streams-tck:${reactiveStreamsVersion}") {
+		// without this exclusion, testng brings an old version of junit which *embeds* an old version of hamcrest
+		// which gets picked up first and that we don't want. TCK runs fine w/o (old) junit 4.
+		exclude group: 'junit', module: 'junit'
+	}
 
 	// JSR-305 annotations
-	optional "com.google.code.findbugs:jsr305:$jsr305Version"
+	compileOnly "com.google.code.findbugs:jsr305:${findbugsVersion}"
+	testCompileOnly "com.google.code.findbugs:jsr305:${findbugsVersion}"
 
 	//Optional Logging Operator
-	optional "org.slf4j:slf4j-api:$slf4jVersion"
+	compileOnly "org.slf4j:slf4j-api:$slf4jVersion"
+	testCompileOnly "org.slf4j:slf4j-api:$slf4jVersion"
 
 	//Optional Metrics
-	optional "io.micrometer:micrometer-core:$micrometerVersion"
+	compileOnly "io.micrometer:micrometer-core:$micrometerVersion"
 
-	optional "org.jetbrains.kotlin:kotlin-stdlib:${kotlinVersion}"
+	// Not putting kotlin-stdlib as implementation to not force it as a transitive lib
+	compileOnly "org.jetbrains.kotlin:kotlin-stdlib:${kotlinVersion}"
+	testImplementation "org.jetbrains.kotlin:kotlin-stdlib:${kotlinVersion}"
 
 	//Optional BlockHound support
-	optional "io.projectreactor.tools:blockhound:$blockhoundVersion"
+	compileOnly "io.projectreactor.tools:blockhound:$blockhoundVersion"
+	// Also make BlockHound visible in the CP of dedicated testset
+	blockHoundTestImplementation "io.projectreactor.tools:blockhound:$blockhoundVersion"
 
 	//Optional JDK 9 Converter
 	jsr166backport "io.projectreactor:jsr166:$jsr166BackportVersion"
 
-	testCompile "junit:junit:$jUnitVersion"
-	testCompile "org.junit.jupiter:junit-jupiter-api:${jUnitJupiterVersion}"
-	testCompile "org.junit.platform:junit-platform-launcher:1.6.1"
-	testCompile "org.junit.jupiter:junit-jupiter-params:${jUnitJupiterVersion}"
-	testRuntime "org.junit.jupiter:junit-jupiter-engine:${jUnitJupiterVersion}"
-	testRuntime "org.junit.vintage:junit-vintage-engine:${jUnitJupiterVersion}"
+	testImplementation platform("org.junit:junit-bom:${jUnitPlatformVersion}")
+	testImplementation "org.junit.jupiter:junit-jupiter-api"
+	testImplementation "org.junit.platform:junit-platform-launcher"
+	testImplementation "org.junit.jupiter:junit-jupiter-params"
+	testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine"
 
-	testRuntime "ch.qos.logback:logback-classic:$logbackVersion"
-	testRuntime "io.micrometer:micrometer-core:$micrometerVersion"
+	testImplementation "ch.qos.logback:logback-classic:$logbackVersion"
 	// Testing
-	testCompile(project(":reactor-test")) {
+	testImplementation(project(":reactor-test")) {
 		exclude module: 'reactor-core'
 	}
 
-	testCompile "org.assertj:assertj-core:$assertJVersion"
-	testCompile "org.testng:testng:$testNgVersion"
-	testCompile "org.mockito:mockito-core:$mockitoVersion"
-	testCompile "org.openjdk.jol:jol-core:$javaObjectLayoutVersion"
-	testCompile "pl.pragmatists:JUnitParams:$jUnitParamsVersion"
-	testCompile "org.awaitility:awaitility:$awaitilityVersion"
-	testCompile "com.pivovarit:throwing-function:$throwingFunctionVersion"
-	testCompile "com.tngtech.archunit:archunit:0.12.0"
+	testImplementation "org.assertj:assertj-core:$assertJVersion"
+	testImplementation "org.mockito:mockito-core:$mockitoVersion"
+	testImplementation "org.openjdk.jol:jol-core:$javaObjectLayoutVersion"
+	testImplementation "org.awaitility:awaitility:$awaitilityVersion"
+	testImplementation "com.pivovarit:throwing-function:$throwingFunctionVersion"
+	testImplementation "com.tngtech.archunit:archunit:0.12.0"
 
-	noMicrometerTestCompile sourceSets.main.output
-	noMicrometerTestCompile sourceSets.test.output
-	noMicrometerTestCompile configurations.testCompile
+	// withMicrometerTest is a test-set that validates what happens when micrometer *IS*
+	// on the classpath. Needs sourceSets.test.output because tests there use helpers like AutoDisposingRule etc.
+	withMicrometerTestImplementation "io.micrometer:micrometer-core:$micrometerVersion"
+	withMicrometerTestImplementation sourceSets.test.output
+
+  	jcstressImplementation(project(":reactor-test")) {
+	  exclude module: 'reactor-core'
+	}
+  	jcstressImplementation "ch.qos.logback:logback-classic:$logbackVersion"
+
 }
 
-task downloadBaseline {
-	if (project.gradle.startParameter.isOffline()) {
-		println "Offline: skipping downloading of baseline and JAPICMP"
-	}
-	else if ("$compatibleVersion" == "SKIP") {
-		println "SKIP: Instructed to skip the baseline comparison"
-	}
-	else {
-		println "Will download and perform baseline comparison with ${compatibleVersion}"
-		finalizedBy { doDownloadBaseline }
-	}
-}
-
-task doDownloadBaseline(type: Download) {
+task downloadBaseline(type: Download) {
 	onlyIfNewer true
 	compress true
 
 	src "${repositories.jcenter().url}io/projectreactor/reactor-core/$compatibleVersion/reactor-core-${compatibleVersion}.jar"
 	dest "${buildDir}/baselineLibs/reactor-core-${compatibleVersion}.jar"
-
-	finalizedBy { japicmp }
 }
 
 task japicmp(type: JapicmpTask) {
+	if (project.gradle.startParameter.isOffline()) {
+		println "Offline: skipping downloading of baseline and JAPICMP"
+	  	enabled = false
+	}
+	else if ("$compatibleVersion" == "SKIP") {
+		println "SKIP: Instructed to skip the baseline comparison"
+	  	enabled = false
+	}
+	else {
+		println "Will download and perform baseline comparison with ${compatibleVersion}"
+	  	dependsOn(downloadBaseline)
+	}
+
 	oldClasspath = files("${buildDir}/baselineLibs/reactor-core-${compatibleVersion}.jar")
-	newClasspath = files(jar.archivePath)
-	onlyBinaryIncompatibleModified = true
-	failOnModification = true
-	failOnSourceIncompatibility = true
+	newClasspath = files(jar.archiveFile)
+	onlyBinaryIncompatibleModified = false
+	failOnModification = false
+	failOnSourceIncompatibility = false
 	txtOutputFile = file("${project.buildDir}/reports/japi.txt")
 	ignoreMissingClasses = true
 	includeSynthetic = true
 
-	//TODO after a release, bump the gradle.properties baseline
-	//TODO after a release, remove the reactor-core exclusions below if any
-//	classExcludes = []
-//	methodExcludes = ["reactor.core.Scannable#operatorName()"]
+	//TODO after a .0 release, bump the gradle.properties baseline
+	//TODO after a .0 release, remove the reactor-core exclusions below if any
+	classExcludes = [ ]
+	methodExcludes = [ ]
+}
+
+gradle.taskGraph.afterTask { task, state ->
+	if (task instanceof JapicmpTask && state.failure && ((JapicmpTask) task).richReport == null) {
+		//FIXME print the rich report somehow on console ?
+		print file("${project.buildDir}/reports/japi.txt").getText()
+	}
 }
 
 //complements the javadoc.gradle common configuration
 javadoc {
-	options.addBooleanOption('nodeprecated', true)
 	options.overview = "$rootDir/docs/api/overview.html"
 	excludes = [
-		// Must be public due to the ServiceLoader's requirements
-		"reactor/core/scheduler/ReactorBlockHoundIntegration.java"
+			// Must be public due to the ServiceLoader's requirements
+			"reactor/core/scheduler/ReactorBlockHoundIntegration.java"
 	]
 	doLast {
 		// work around https://github.com/gradle/gradle/issues/4046
@@ -174,23 +196,30 @@ task loops(type: Test, group: 'verification') {
 	}
 }
 
-task testNG(type: Test, group: 'verification') {
-	useTestNG()
+task reactivestreamsTCK(type: Test, group: 'verification') {
 	include '**/*Verification.*'
 	doFirst {
-		println "Additional tests from `testNG` ($includes)"
+		println "Additional tests from `${name}` (${includes})"
 	}
 }
 
-task testNoMicrometer(type: Test, group: 'verification') {
-	testClassesDirs = sourceSets.noMicrometerTest.output.classesDirs
-	classpath = sourceSets.noMicrometerTest.runtimeClasspath
-	include '**/*NoMicrometerTest.*'
-
-	doFirst {
-		println "Additional tests without Micrometer ($includes)"
+tasks.withType(Test).all {
+	if (it.name == "reactivestreamsTCK") {
+		useTestNG()
+	} else {
+		def tags = rootProject.findProperty("junit-tags")
+		if (tags != null) {
+			println "junit5 tags for core: $tags"
+			useJUnitPlatform() {
+				includeTags "$tags"
+			}
+		}
+		else {
+			useJUnitPlatform()
+		}
 	}
 }
+
 
 blockHoundTest {
 	// Creates a JVM per test because the agent can be installed only once
@@ -198,17 +227,13 @@ blockHoundTest {
 	maxParallelForks = 1
 }
 
-tasks.withType(Test).all {
-  useJUnitPlatform()
-}
-
 //inherit basic test task + common configuration in root
-//always depend on testNoMicrometer, skip testNG on Travis, skip loops when not releasing
+//always depend on testNoMicrometer, skip reactivestreamsTCK on Travis, skip loops when not releasing
 //note that this way the tasks can be run individually
 check {
-	dependsOn testNoMicrometer
+	dependsOn withMicrometerTest
 	if (!detectedCiServers.contains("TRAVIS")) {
-		dependsOn testNG
+		dependsOn reactivestreamsTCK
 	}
 	if (!version.endsWith('-SNAPSHOT') && !version.contains('-SNAPSHOT-')) { //neither classic nor customized snapshots
 		dependsOn loops
@@ -233,9 +258,19 @@ jar {
 
 jacocoTestReport.dependsOn test
 check.dependsOn jacocoTestReport
-jar.finalizedBy(downloadBaseline)
+check.dependsOn japicmp
+
+jcstress {
+	mode = 'quick' //quick, default, tough
+	jcstressDependency = "org.openjdk.jcstress:jcstress-core:0.7"
+}
+tasks.check.dependsOn(tasks.jcstress)
 
 if (JavaVersion.current().java9Compatible) {
+	// SharedSecretsCallSiteSupplierFactory is a Java 8 specific optimization.
+	// It uses sun.misc.SharedSecrets which is unavailable on Java 9+, and the compilation would fail with JDK 9.
+	// This workaround allows compiling the main sourceset on JDK 9+ while still referring to the Java 8 classes.
+
 	sourceSets {
 		java8stubs.java.srcDirs = ['src/main/java8stubs']
 	}
@@ -253,6 +288,9 @@ if (JavaVersion.current().java9Compatible) {
 	}
 }
 else {
+	// reactor.core.publisher.Traces contains a strategy that only works with Java 9+.
+	// While compiling on Java 8, we can't access Java 9+ APIs.
+	// To workaround this, we "link" the main sourceset to the stubs of Java 9 APIs without having to use the Java 9 target.
 	sourceSets {
 		java9stubs.java.srcDirs = ['src/main/java9stubs']
 	}

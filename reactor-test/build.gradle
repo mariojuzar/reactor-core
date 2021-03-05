@@ -24,47 +24,36 @@ ext {
 	bndOptions = [
 		"Export-Package": [
 			"!*internal*",
-			"reactor.test*;-noimport:=true"
+			"reactor.test*;version=$osgiVersion;-noimport:=true"
 		].join(","),
 		"Import-Package": [
 			"!javax.annotation",
 			"kotlin.*;resolution:=optional,*"
 		].join(","),
 		"Bundle-Name" : "reactor-test",
-		"Bundle-SymbolicName" : "io.projectreactor.reactor-test"
+		"Bundle-SymbolicName" : "io.projectreactor.reactor-test",
+		"Bundle-Version" : "$osgiVersion"
 	]
 }
 
 dependencies {
-	compile project(":reactor-core")
+	api project(":reactor-core")
+	compileOnly "com.google.code.findbugs:jsr305:${findbugsVersion}"
 
-	optional "org.jetbrains.kotlin:kotlin-stdlib:${kotlinVersion}"
+	// Not putting kotlin-stdlib as implementation to not force it as a transitive lib
+	compileOnly "org.jetbrains.kotlin:kotlin-stdlib:${kotlinVersion}"
+	testImplementation "org.jetbrains.kotlin:kotlin-stdlib:${kotlinVersion}"
 
-	testCompile "junit:junit:$jUnitVersion"
-	testImplementation "org.junit.jupiter:junit-jupiter-api:${jUnitJupiterVersion}"
-	testRuntime "org.junit.jupiter:junit-jupiter-engine:${jUnitJupiterVersion}"
-	testRuntime "org.junit.vintage:junit-vintage-engine:${jUnitJupiterVersion}"
+	testImplementation platform("org.junit:junit-bom:${jUnitPlatformVersion}")
+	testImplementation "org.junit.jupiter:junit-jupiter-api"
+	testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine"
+	testRuntimeOnly "ch.qos.logback:logback-classic:$logbackVersion"
 
-	testRuntime "ch.qos.logback:logback-classic:$logbackVersion"
-
-	testCompile "org.assertj:assertj-core:$assertJVersion"
-	testCompile "org.mockito:mockito-core:$mockitoVersion"
+	testImplementation "org.assertj:assertj-core:$assertJVersion"
+	testImplementation "org.mockito:mockito-core:$mockitoVersion"
 }
 
-task downloadBaseline {
-	if (project.gradle.startParameter.isOffline()) {
-		println "Offline: skipping downloading of baseline and JAPICMP"
-	}
-	else if ("$compatibleVersion" == "SKIP") {
-		println "SKIP: Instructed to skip the baseline comparison"
-	}
-	else {
-		println "Will download and perform baseline comparison with ${compatibleVersion}"
-		finalizedBy { doDownloadBaseline }
-	}
-}
-
-task doDownloadBaseline(type: Download) {
+task downloadBaseline(type: Download) {
 	onlyIfNewer true
 	compress true
 
@@ -75,8 +64,21 @@ task doDownloadBaseline(type: Download) {
 }
 
 task japicmp(type: JapicmpTask) {
+	if (project.gradle.startParameter.isOffline()) {
+		println "Offline: skipping downloading of baseline and JAPICMP"
+	  	enabled = false
+	}
+	else if ("$compatibleVersion" == "SKIP") {
+		println "SKIP: Instructed to skip the baseline comparison"
+	  	enabled = false
+	}
+	else {
+		println "Will download and perform baseline comparison with ${compatibleVersion}"
+	  	dependsOn(downloadBaseline)
+	}
+
 	oldClasspath = files("${buildDir}/baselineLibs/reactor-test-${compatibleVersion}.jar")
-	newClasspath = files(jar.archivePath)
+	newClasspath = files(jar.archiveFile)
 	onlyBinaryIncompatibleModified = true
 	failOnModification = true
 	failOnSourceIncompatibility = true
@@ -84,7 +86,8 @@ task japicmp(type: JapicmpTask) {
 	ignoreMissingClasses = true
 	includeSynthetic = true
 
-	//TODO after a release, remove the reactor-test exclusions below if any
+	//TODO after a .0 release, remove the reactor-test exclusions below if any
+	methodExcludes = [ ]
 }
 
 tasks.withType(Test).all {
@@ -102,4 +105,8 @@ jar {
 	bnd(bndOptions)
 }
 
-jar.finalizedBy(downloadBaseline)
+tasks.withType(Test).all {
+	useJUnitPlatform()
+}
+
+check.dependsOn japicmp

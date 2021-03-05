@@ -15,7 +15,6 @@
  */
 package reactor.util;
 
-import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.HashMap;
 import java.util.function.Function;
@@ -47,7 +46,7 @@ public abstract class Loggers {
 	 */
 	public static final String FALLBACK_PROPERTY = "reactor.logging.fallback";
 
-	private static LoggerFactory LOGGER_FACTORY;
+	private static Function<String, ? extends Logger> LOGGER_FACTORY;
 
 	static {
 		resetLoggerFactory();
@@ -64,7 +63,7 @@ public abstract class Loggers {
 	 * @see #useConsoleLoggers()
 	 * @see #useVerboseConsoleLoggers()
 	 */
-	public static final void resetLoggerFactory() {
+	public static void resetLoggerFactory() {
 		try {
 			useSl4jLoggers();
 		}
@@ -85,7 +84,7 @@ public abstract class Loggers {
 	 *
 	 * @return true if falling back to JDK, false for Console.
 	 */
-	static final boolean isFallbackToJdk() {
+	static boolean isFallbackToJdk() {
 		return "JDK".equalsIgnoreCase(System.getProperty(FALLBACK_PROPERTY));
 	}
 
@@ -99,10 +98,10 @@ public abstract class Loggers {
 	 * The previously active logger factory is simply replaced without
 	 * any particular clean-up.
 	 */
-	public static final void useConsoleLoggers() {
-		String name = LoggerFactory.class.getName();
-		LoggerFactory loggerFactory = new ConsoleLoggerFactory(false);
-		loggerFactory.getLogger(name).debug("Using Console logging");
+	public static void useConsoleLoggers() {
+		String name = Loggers.class.getName();
+		Function<String, Logger> loggerFactory = new ConsoleLoggerFactory(false);
+		loggerFactory.apply(name).debug("Using Console logging");
 		LOGGER_FACTORY = loggerFactory;
 	}
 
@@ -115,10 +114,10 @@ public abstract class Loggers {
 	 * The previously active logger factory is simply replaced without
 	 * any particular clean-up.
 	 */
-	public static final void useVerboseConsoleLoggers() {
-		String name = LoggerFactory.class.getName();
-		LoggerFactory loggerFactory = new ConsoleLoggerFactory(true);
-		loggerFactory.getLogger(name).debug("Using Verbose Console logging");
+	public static void useVerboseConsoleLoggers() {
+		String name = Loggers.class.getName();
+		Function<String, Logger> loggerFactory = new ConsoleLoggerFactory(true);
+		loggerFactory.apply(name).debug("Using Verbose Console logging");
 		LOGGER_FACTORY = loggerFactory;
 	}
 
@@ -132,10 +131,10 @@ public abstract class Loggers {
 	 * @param loggerFactory the {@link Function} that provides a (possibly cached) {@link Logger}
 	 * given a name.
 	 */
-	public static final void useCustomLoggers(final Function<String, ? extends Logger> loggerFactory) {
-		String name = LoggerFactory.class.getName();
+	public static void useCustomLoggers(final Function<String, ? extends Logger> loggerFactory) {
+		String name = Loggers.class.getName();
 		loggerFactory.apply(name).debug("Using custom logging");
-		LOGGER_FACTORY = loggerFactory::apply;
+		LOGGER_FACTORY = loggerFactory;
 	}
 
 	/**
@@ -145,10 +144,10 @@ public abstract class Loggers {
 	 * The previously active logger factory is simply replaced without
 	 * any particular clean-up.
 	 */
-	public static final void useJdkLoggers() {
-		String name = LoggerFactory.class.getName();
-		LoggerFactory loggerFactory = new JdkLoggerFactory();
-		loggerFactory.getLogger(name).debug("Using JDK logging framework");
+	public static void useJdkLoggers() {
+		String name = Loggers.class.getName();
+		Function<String, Logger> loggerFactory = new JdkLoggerFactory();
+		loggerFactory.apply(name).debug("Using JDK logging framework");
 		LOGGER_FACTORY = loggerFactory;
 	}
 
@@ -160,10 +159,10 @@ public abstract class Loggers {
 	 * The previously active logger factory is simply replaced without
 	 * any particular clean-up.
 	 */
-	public static final void useSl4jLoggers() {
-		String name = LoggerFactory.class.getName();
-		LoggerFactory loggerFactory = new Slf4JLoggerFactory();
-		loggerFactory.getLogger(name).debug("Using Slf4j logging framework");
+	public static void useSl4jLoggers() {
+		String name = Loggers.class.getName();
+		Function<String, Logger> loggerFactory = new Slf4JLoggerFactory();
+		loggerFactory.apply(name).debug("Using Slf4j logging framework");
 		LOGGER_FACTORY = loggerFactory;
 	}
 
@@ -179,7 +178,7 @@ public abstract class Loggers {
 	 * @return a new {@link Logger} instance
 	 */
 	public static Logger getLogger(String name) {
-		return LOGGER_FACTORY.getLogger(name);
+		return LOGGER_FACTORY.apply(name);
 	}
 
 	/**
@@ -191,17 +190,13 @@ public abstract class Loggers {
 	 * @return a new {@link Logger} instance
 	 */
 	public static Logger getLogger(Class<?> cls) {
-		return LOGGER_FACTORY.getLogger(cls.getName());
+		return LOGGER_FACTORY.apply(cls.getName());
 	}
 
-	private interface LoggerFactory {
-		Logger getLogger(String name);
-	}
-
-	private static class Slf4JLoggerFactory implements LoggerFactory {
+	private static class Slf4JLoggerFactory implements Function<String, Logger> {
 
 		@Override
-		public Logger getLogger(String name) {
+		public Logger apply(String name) {
 			return new Slf4JLogger(org.slf4j.LoggerFactory.getLogger(name));
 		}
 	}
@@ -451,10 +446,10 @@ public abstract class Loggers {
 		}
 	}
 
-	private static class JdkLoggerFactory implements LoggerFactory {
+	private static class JdkLoggerFactory implements Function<String, Logger> {
 
 		@Override
-		public Logger getLogger(String name) {
+		public Logger apply(String name) {
 			return new JdkLogger(java.util.logging.Logger.getLogger(name));
 		}
 	}
@@ -623,7 +618,7 @@ public abstract class Loggers {
 		}
 	}
 
-	private static final class ConsoleLoggerFactory implements LoggerFactory {
+	private static final class ConsoleLoggerFactory implements Function<String, Logger> {
 
 		private static final HashMap<String, Logger> consoleLoggers = new HashMap<>();
 
@@ -634,7 +629,7 @@ public abstract class Loggers {
 		}
 
 		@Override
-		public Logger getLogger(String name) {
+		public Logger apply(String name) {
 			return consoleLoggers.computeIfAbsent(name, n -> new ConsoleLogger(n, verbose));
 		}
 	}

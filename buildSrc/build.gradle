@@ -15,35 +15,32 @@
  */
 
 plugins {
-  id 'java-gradle-plugin'
+	id 'java-gradle-plugin'
 }
 
 repositories {
-  mavenCentral()
-  jcenter()
-  gradlePluginPortal()
+	mavenCentral()
+	jcenter()
+	gradlePluginPortal()
 }
 
 dependencies {
-  testImplementation("org.assertj:assertj-core:3.11.1")
-  testImplementation("org.junit.jupiter:junit-jupiter-api:5.5.2")
-  testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.5.2")
+	testImplementation("org.assertj:assertj-core:3.11.1")
+	testImplementation platform("org.junit:junit-bom:5.6.0")
+	testImplementation "org.junit.jupiter:junit-jupiter-api"
+	testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine"
 }
 
 test {
-  useJUnitPlatform()
-  testLogging {
-	showStackTraces = true
-	exceptionFormat = "FULL"
-  }
+	useJUnitPlatform()
+	testLogging {
+		showStackTraces = true
+		exceptionFormat = "FULL"
+	}
 }
 
 gradlePlugin {
 	plugins {
-		customVersionPlugin {
-			id = "io.reactor.gradle.custom-version"
-			implementationClass = "io.reactor.gradle.CustomVersionPlugin"
-		}
 		detectCIPlugin {
 			id = "io.reactor.gradle.detect-ci"
 			implementationClass = "io.reactor.gradle.DetectCiPlugin"
@@ -51,10 +48,6 @@ gradlePlugin {
 		javaConventionsPlugin {
 			id = "io.reactor.gradle.java-conventions"
 			implementationClass = "io.reactor.gradle.JavaConventions"
-		}
-		optionalDependenciesPlugin {
-			id = "io.reactor.gradle.optional-dependencies"
-			implementationClass = "io.reactor.gradle.OptionalDependenciesPlugin"
 		}
 	}
 }

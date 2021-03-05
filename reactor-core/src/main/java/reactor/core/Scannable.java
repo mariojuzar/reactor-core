@@ -51,10 +51,10 @@ import reactor.util.function.Tuple2;
 @FunctionalInterface
 public interface Scannable {
 
-    /**
-     * The pattern for matching words unrelated to operator name.
-     * Used to strip an operator name of various prefixes and suffixes.
-     */
+	/**
+	 * The pattern for matching words unrelated to operator name.
+	 * Used to strip an operator name of various prefixes and suffixes.
+	 */
 	Pattern OPERATOR_NAME_UNRELATED_WORDS_PATTERN =
 		Pattern.compile("Parallel|Flux|Mono|Publisher|Subscriber|Fuseable|Operator|Conditional");
 
@@ -211,6 +211,35 @@ public interface Scannable {
 		public static final Attr<Stream<Tuple2<String, String>>> TAGS = new Attr<>(null);
 
 		/**
+		 * An {@link RunStyle} enum attribute indicating whether or not an operator continues to operate on the same thread.
+		 * Each value provides a different degree of guarantee from weakest {@link RunStyle#UNKNOWN} to strongest {@link RunStyle#SYNC}.
+		 *
+		 * Defaults to {@link RunStyle#UNKNOWN}.
+		 */
+		public static final Attr<RunStyle> RUN_STYLE = new Attr<>(RunStyle.UNKNOWN);
+
+		/**
+		 * An {@link Enum} enumerating the different styles an operator can run : their {@link #ordinal()} reflects the level of confidence
+		 * in their running mode
+		 */
+		public enum RunStyle {
+			/**
+				no guarantees can be given on the running mode (default value, weakest level of guarantee)
+			 */
+			UNKNOWN,
+
+			/**
+			 	the operator may change threads while running
+			 */
+			ASYNC,
+
+			/**
+			 	guarantees the operator doesn't change threads (strongest level of guarantee)
+			 */
+			SYNC;
+		}
+
+		/**
 		 * Meaningful and always applicable default value for the attribute, returned
 		 * instead of {@literal null} when a specific value hasn't been defined for a
 		 * component. {@literal null} if no sensible generic default is available.
@@ -287,6 +316,11 @@ public interface Scannable {
 			public String toString() {
 				return "UNAVAILABLE_SCAN";
 			}
+
+			@Override
+			public String stepName() {
+				return "UNAVAILABLE_SCAN";
+			}
 		};
 
 		/**
@@ -306,6 +340,11 @@ public interface Scannable {
 
 			@Override
 			public String toString() {
+				return "NULL_SCAN";
+			}
+
+			@Override
+			public String stepName() {
 				return "NULL_SCAN";
 			}
 		};
@@ -408,18 +447,19 @@ public interface Scannable {
 	 * its chain of {@link #parents()} and {@link #actuals()}.
 	 */
 	default String stepName() {
-		// /!\ this code is duplicated in `InnerConsumer#stepName` in order to use simple class name instead of toString
-
 		/*
 		 * Strip an operator name of various prefixes and suffixes.
 		 * @param name the operator name, usually simpleClassName or fully-qualified classname.
 		 * @return the stripped operator name
 		 */
-		String name = toString();
-		if (name.contains("@") && name.contains("$")) {
-			name = name
-				.substring(0, name.indexOf('$'))
-				.substring(name.lastIndexOf('.') + 1);
+		String name = getClass().getName();
+		int innerClassIndex = name.indexOf('$');
+		if (innerClassIndex != -1) {
+			name = name.substring(0, innerClassIndex);
+		}
+		int stripPackageIndex = name.lastIndexOf('.');
+		if (stripPackageIndex != -1) {
+			name = name.substring(stripPackageIndex + 1);
 		}
 		String stripped = OPERATOR_NAME_UNRELATED_WORDS_PATTERN
 			.matcher(name)

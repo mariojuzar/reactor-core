@@ -16,8 +16,7 @@
 package reactor.core.publisher;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
@@ -25,24 +24,33 @@ import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.context.Context;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+
 public class FluxWithLatestFromTest {
 
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new FluxWithLatestFrom<>(null, Flux.never(), (a, b) -> a);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxWithLatestFrom<>(null, Flux.never(), (a, b) -> a);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void otherNull() {
-		Flux.never()
-		    .withLatestFrom(null, (a, b) -> a);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never()
+					.withLatestFrom(null, (a, b) -> a);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void combinerNull() {
-		Flux.never()
-		    .withLatestFrom(Flux.never(), null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never()
+					.withLatestFrom(Flux.never(), null);
+		});
 	}
 
 	@Test
@@ -142,7 +150,7 @@ public class FluxWithLatestFromTest {
 		ts.assertNoValues()
 		  .assertNotComplete()
 		  .assertError(RuntimeException.class)
-		  .assertErrorWith( e -> Assert.assertTrue(e.getMessage().contains("forced failure")));
+		  .assertErrorWith( e -> assertThat(e).hasMessageContaining("forced failure"));
 	}
 
 
@@ -151,6 +159,15 @@ public class FluxWithLatestFromTest {
 		StepVerifier.create(Flux.just(1).withLatestFrom(Flux.just(2), (a, b) ->
 				null))
 		            .verifyError(NullPointerException.class);
+	}
+
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxWithLatestFrom<Integer, Integer, Integer> test = new FluxWithLatestFrom<>(parent, Flux.just(2), (v1, v2) -> v1 + v2);
+
+		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -163,6 +180,7 @@ public class FluxWithLatestFromTest {
 
 		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		Assertions.assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
 		test.cancel();
@@ -180,5 +198,6 @@ public class FluxWithLatestFromTest {
 		test.onSubscribe(parent);
 		Assertions.assertThat(test.currentContext()).isEqualTo(Context.empty());
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(main);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
     }
 }

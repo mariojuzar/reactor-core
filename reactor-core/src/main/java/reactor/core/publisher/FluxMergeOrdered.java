@@ -23,13 +23,11 @@ import java.util.Queue;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
-import java.util.function.Supplier;
 
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Exceptions;
-import reactor.core.Scannable;
 import reactor.util.annotation.Nullable;
 import reactor.util.concurrent.Queues;
 
@@ -47,13 +45,11 @@ import reactor.util.concurrent.Queues;
 final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 
 	final int                      prefetch;
-	final Supplier<Queue<T>>       queueSupplier;
 	final Comparator<? super T>    valueComparator;
 	final Publisher<? extends T>[] sources;
 
 	@SafeVarargs
 	FluxMergeOrdered(int prefetch,
-			Supplier<Queue<T>> queueSupplier,
 			Comparator<? super T> valueComparator,
 			Publisher<? extends T>... sources) {
 		if (prefetch <= 0) {
@@ -69,7 +65,6 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 		}
 
 		this.prefetch = prefetch;
-		this.queueSupplier = queueSupplier;
 		this.valueComparator = valueComparator;
 	}
 
@@ -95,9 +90,9 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 			@SuppressWarnings("unchecked")
 			Comparator<T> currentComparator = (Comparator<T>) this.valueComparator;
 			final Comparator<T> newComparator = currentComparator.thenComparing(otherComparator);
-			return new FluxMergeOrdered<>(prefetch, queueSupplier, newComparator, newArray);
+			return new FluxMergeOrdered<>(prefetch, newComparator, newArray);
 		}
-		return new FluxMergeOrdered<>(prefetch, queueSupplier, valueComparator, newArray);
+		return new FluxMergeOrdered<>(prefetch, valueComparator, newArray);
 	}
 
 	@Override
@@ -111,6 +106,7 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 		if (key == Attr.PARENT) return sources.length > 0 ? sources[0] : null;
 		if (key == Attr.PREFETCH) return prefetch;
 		if (key == Attr.DELAY_ERROR) return true;
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 		return null;
 	}
@@ -330,6 +326,7 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 			if (key == Attr.ERROR) return this.error;
 			if (key == Attr.DELAY_ERROR) return true;
 			if (key == Attr.REQUESTED_FROM_DOWNSTREAM) return requested - emitted;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 			return null;
 		}
@@ -346,16 +343,16 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 
 		volatile boolean done;
 
-		volatile Subscription s;
-		AtomicReferenceFieldUpdater<MergeOrderedInnerSubscriber, Subscription> S =
+		volatile     Subscription                                                           s;
+		@SuppressWarnings("rawtypes")
+		static final AtomicReferenceFieldUpdater<MergeOrderedInnerSubscriber, Subscription> S =
 				AtomicReferenceFieldUpdater.newUpdater(MergeOrderedInnerSubscriber.class, Subscription.class, "s");
 
-		MergeOrderedInnerSubscriber(MergeOrderedMainProducer<T> parent,
-				int prefetch) {
+		MergeOrderedInnerSubscriber(MergeOrderedMainProducer<T> parent, int prefetch) {
 			this.parent = parent;
 			this.prefetch = prefetch;
 			this.limit = prefetch - (prefetch >> 2);
-			this.queue = Queues.<T>small().get();
+			this.queue = Queues.<T>get(prefetch).get();
 		}
 
 		@Override
@@ -421,6 +418,7 @@ final class FluxMergeOrdered<T> extends Flux<T> implements SourceProducer<T> {
 			if (key == Attr.PREFETCH) return prefetch;
 			if (key == Attr.TERMINATED) return done;
 			if (key == Attr.BUFFERED) return queue.size();
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 			return null;
 		}

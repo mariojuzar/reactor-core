@@ -16,25 +16,29 @@
 
 package reactor.core.publisher;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class MonoAllTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new MonoAll<>(null, v -> true);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new MonoAll<>(null, v -> true);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void predicateNull() {
-		new MonoAll<>(null, null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new MonoAll<>(null, null);
+		});
 	}
 
 	@Test
@@ -104,8 +108,14 @@ public class MonoAllTest {
 		ts.assertNoValues()
 		  .assertNotComplete()
 		  .assertError(RuntimeException.class)
-		  .assertErrorWith(e -> Assert.assertTrue(e.getMessage()
-		                                           .contains("forced failure")));
+		  .assertErrorWith(e -> assertThat(e).hasMessageContaining("forced failure"));
+	}
+
+	@Test
+	public void scanOperator(){
+	    MonoAll<Integer> test = new MonoAll<>(Flux.just(1, 2, 3), v -> true);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -119,7 +129,7 @@ public class MonoAllTest {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
-
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.onError(new IllegalStateException("boom"));

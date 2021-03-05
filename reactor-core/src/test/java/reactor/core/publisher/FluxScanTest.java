@@ -16,13 +16,12 @@
 
 package reactor.core.publisher;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 
 import reactor.core.CoreSubscriber;
@@ -30,9 +29,9 @@ import reactor.core.Scannable;
 import reactor.test.publisher.FluxOperatorTest;
 import reactor.test.subscriber.AssertSubscriber;
 import reactor.test.util.RaceTestUtils;
-import reactor.util.context.Context;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxScanTest extends FluxOperatorTest<String, String> {
 
@@ -60,14 +59,18 @@ public class FluxScanTest extends FluxOperatorTest<String, String> {
 		);
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new FluxScan<>(null, (a, b) -> a);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxScan<>(null, (a, b) -> a);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void accumulatorNull() {
-		Flux.never().scan(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never().scan(null);
+		});
 	}
 
 	@Test
@@ -156,7 +159,7 @@ public class FluxScanTest extends FluxOperatorTest<String, String> {
 			RaceTestUtils.race(sub::cancel, () -> sub.onNext(1));
 
 			testSubscriber.assertNoError();
-			assertThat(accumulatorCheck).as("no NPE due to onNext/cancel race in round " + i).isTrue();
+			assertThat(accumulatorCheck).as("no NPE due to onNext/cancel race in round %d", i).isTrue();
 		}
 	}
 
@@ -172,10 +175,10 @@ public class FluxScanTest extends FluxOperatorTest<String, String> {
 
 		sub.onNext(1);
 		sub.onNext(2);
-		assertThat(sub.value).isEqualTo(3);
+		Assertions.assertThat(sub.value).isEqualTo(3);
 
 		sub.onComplete();
-		assertThat(sub.value).isNull();
+		Assertions.assertThat(sub.value).isNull();
 
 		testSubscriber.assertNoError();
 	}
@@ -192,12 +195,21 @@ public class FluxScanTest extends FluxOperatorTest<String, String> {
 
 		sub.onNext(1);
 		sub.onNext(2);
-		assertThat(sub.value).isEqualTo(3);
+		Assertions.assertThat(sub.value).isEqualTo(3);
 
 		sub.onError(new RuntimeException("boom"));
-		assertThat(sub.value).isNull();
+		Assertions.assertThat(sub.value).isNull();
 
 		testSubscriber.assertErrorMessage("boom");
+	}
+
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxScan<Integer> test = new FluxScan<>(parent, (v1, v2) -> v1);
+
+		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -209,6 +221,7 @@ public class FluxScanTest extends FluxOperatorTest<String, String> {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
         test.value = 5;
         Assertions.assertThat(test.scan(Scannable.Attr.BUFFERED)).isEqualTo(1);
 

@@ -19,14 +19,14 @@ package reactor.core.publisher;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.concurrent.Queues;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class FluxMergeTest {
 
@@ -91,7 +91,7 @@ public class FluxMergeTest {
 		AtomicLong request = new AtomicLong();
 		StepVerifier.create(Flux.merge(Flux.just(Flux.just(1, 2), Flux.just(3, 4)).doOnRequest(request::set)))
 	                .expectNext(1, 2, 3, 4)
-	                .then(() -> assertThat(request.get()).isEqualTo(1) )
+	                .then(() -> assertThat(request).hasValue(1L) )
 	                .verifyComplete();
 	}
 
@@ -154,5 +154,6 @@ public class FluxMergeTest {
 		FluxMerge<String> s = new FluxMerge<>(sources, true, 3, Queues.small(), 123, Queues.small());
 		assertThat(s.scan(Scannable.Attr.DELAY_ERROR)).as("delayError").isTrue();
 		assertThat(s.scan(Scannable.Attr.PREFETCH)).as("prefetch").isEqualTo(123);
+		assertThat(s.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 }

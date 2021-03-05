@@ -51,6 +51,7 @@ import reactor.util.annotation.Nullable;
  * @author Stephane Maldini
  * @author Simon Baslé
  */
+// To be removed in 3.5
 final class ElasticScheduler implements Scheduler, Scannable {
 
 	static final AtomicLong COUNTER = new AtomicLong();
@@ -74,7 +75,7 @@ final class ElasticScheduler implements Scheduler, Scannable {
 
 	final Queue<CachedService> all;
 
-	final ScheduledExecutorService evictor;
+	ScheduledExecutorService evictor;
 
 
 	volatile boolean shutdown;
@@ -87,11 +88,8 @@ final class ElasticScheduler implements Scheduler, Scannable {
 		this.factory = factory;
 		this.cache = new ConcurrentLinkedDeque<>();
 		this.all = new ConcurrentLinkedQueue<>();
-		this.evictor = Executors.newScheduledThreadPool(1, EVICTOR_FACTORY);
-		this.evictor.scheduleAtFixedRate(this::eviction,
-				ttlSeconds,
-				ttlSeconds,
-				TimeUnit.SECONDS);
+		//evictor is now started in `start()`. make it look like it is constructed shutdown
+		this.shutdown = true;
 	}
 
 	/**
@@ -107,7 +105,15 @@ final class ElasticScheduler implements Scheduler, Scannable {
 
 	@Override
 	public void start() {
-		throw new UnsupportedOperationException("Restarting not supported yet");
+		if (!shutdown) {
+			return;
+		}
+		this.evictor = Executors.newScheduledThreadPool(1, EVICTOR_FACTORY);
+		this.evictor.scheduleAtFixedRate(this::eviction,
+				ttlSeconds,
+				ttlSeconds,
+				TimeUnit.SECONDS);
+		this.shutdown = false;
 	}
 
 	@Override

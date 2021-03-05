@@ -15,7 +15,7 @@
  */
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
@@ -29,10 +29,10 @@ public class FluxHideTest {
 	@Test
 	public void normal() {
 		Flux<Integer> f = Flux.just(1);
-		assertThat(f instanceof Fuseable.ScalarCallable).isTrue();
+		assertThat(f).isInstanceOf(Fuseable.ScalarCallable.class);
 		f = f.hide();
-		assertThat(f instanceof Fuseable.ScalarCallable).isFalse();
-		assertThat(f instanceof FluxHide).isTrue();
+		assertThat(f).isNotInstanceOf(Fuseable.ScalarCallable.class);
+		assertThat(f).isInstanceOf(FluxHide.class);
 	}
 
 	@Test
@@ -118,6 +118,15 @@ public class FluxHideTest {
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxHide<Integer> test = new FluxHide<>(parent);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanSubscriber() {
 		CoreSubscriber<String> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxHide.HideSubscriber<String> test = new FluxHide.HideSubscriber<>(actual);
@@ -126,6 +135,7 @@ public class FluxHideTest {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
     }
 
 	@Test
@@ -137,5 +147,6 @@ public class FluxHideTest {
 
         assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
     }
 }

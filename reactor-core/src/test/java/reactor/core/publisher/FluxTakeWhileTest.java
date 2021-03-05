@@ -17,24 +17,31 @@
 package reactor.core.publisher;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 public class FluxTakeWhileTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new FluxTakeWhile<>(null, v -> true);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxTakeWhile<>(null, v -> true);
+		});
+
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void predicateNull() {
-		Flux.never()
-		    .takeWhile(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never().takeWhile(null);
+		});
 	}
 
 	@Test
@@ -172,6 +179,15 @@ public class FluxTakeWhileTest {
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxTakeWhile<Integer> test = new FluxTakeWhile<>(parent, v -> true);
+
+		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxTakeWhile.TakeWhileSubscriber<Integer> test =
@@ -181,6 +197,7 @@ public class FluxTakeWhileTest {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         Assertions.assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.onComplete();

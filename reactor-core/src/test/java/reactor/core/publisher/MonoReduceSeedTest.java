@@ -20,10 +20,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
-
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.publisher.ReduceOperatorTest;
@@ -32,6 +30,7 @@ import reactor.test.util.RaceTestUtils;
 import reactor.util.context.Context;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class MonoReduceSeedTest extends ReduceOperatorTest<String, String> {
 
@@ -56,21 +55,27 @@ public class MonoReduceSeedTest extends ReduceOperatorTest<String, String> {
 		);
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new MonoReduceSeed<>(null, () -> 1, (a, b) -> (Integer) b);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new MonoReduceSeed<>(null, () -> 1, (a, b) -> (Integer) b);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void supplierNull() {
-		Flux.never()
-		    .reduceWith(null, (a, b) -> b);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never()
+					.reduceWith(null, (a, b) -> b);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void accumulatorNull() {
-		Flux.never()
-		    .reduceWith(() -> 1, null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never()
+					.reduceWith(() -> 1, null);
+		});
 	}
 
 	@Test
@@ -114,10 +119,9 @@ public class MonoReduceSeedTest extends ReduceOperatorTest<String, String> {
 		}, (a, b) -> b).subscribe(ts);
 
 		ts.assertNoValues()
-		  .assertNotComplete()
-		  .assertError(RuntimeException.class)
-		  .assertErrorWith(e -> Assert.assertTrue(e.getMessage()
-		                                           .contains("forced failure")));
+				.assertNotComplete()
+				.assertError(RuntimeException.class)
+				.assertErrorWith(e -> assertThat(e).hasMessageContaining("forced failure"));
 	}
 
 	@Test
@@ -129,10 +133,9 @@ public class MonoReduceSeedTest extends ReduceOperatorTest<String, String> {
 		}).subscribe(ts);
 
 		ts.assertNoValues()
-		  .assertNotComplete()
-		  .assertError(RuntimeException.class)
-		  .assertErrorWith(e -> Assert.assertTrue(e.getMessage()
-		                                           .contains("forced failure")));
+				.assertNotComplete()
+				.assertError(RuntimeException.class)
+				.assertErrorWith(e -> assertThat(e).hasMessageContaining("forced failure"));
 	}
 
 	@Test
@@ -286,6 +289,13 @@ public class MonoReduceSeedTest extends ReduceOperatorTest<String, String> {
 	}
 
 	@Test
+	public void scanOperator(){
+	    MonoReduceSeed<Integer, Integer> test = new MonoReduceSeed<>(Flux.just(1, 2, 3), () -> 0, (a, b) -> b);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
 	public void scanSubscriber() {
 		CoreSubscriber<String> actual = new LambdaMonoSubscriber<>(null, e -> {}, null, null);
 		MonoReduceSeed.ReduceSeedSubscriber<Integer, String> test = new MonoReduceSeed.ReduceSeedSubscriber<>(
@@ -297,6 +307,7 @@ public class MonoReduceSeedTest extends ReduceOperatorTest<String, String> {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.onError(new IllegalStateException("boom"));

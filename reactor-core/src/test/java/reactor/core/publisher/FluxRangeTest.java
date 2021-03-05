@@ -16,7 +16,7 @@
 
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
@@ -25,6 +25,7 @@ import reactor.test.MockUtils;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxRangeTest {
 
@@ -79,14 +80,18 @@ public class FluxRangeTest {
 		  .assertComplete();
 	}
 
-	@Test(expected = IllegalArgumentException.class)
+	@Test
 	public void countIsNegative() {
-		Flux.range(1, -1);
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Flux.range(1, -1);
+		});
 	}
 
-	@Test(expected = IllegalArgumentException.class)
+	@Test
 	public void rangeOverflow() {
-		Flux.range(2, Integer.MAX_VALUE);
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Flux.range(2, Integer.MAX_VALUE);
+		});
 	}
 
 	@Test
@@ -124,6 +129,14 @@ public class FluxRangeTest {
 	}
 
 	@Test
+	public void scanOperator(){
+	    FluxRange test = new FluxRange(0, 10);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	    assertThat(test.scan(Scannable.Attr.ACTUAL)).isNull();
+	}
+
+	@Test
 	public void scanSubscription() {
 		CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, sub -> sub.request(100));
 		FluxRange.RangeSubscription test = new FluxRange.RangeSubscription(actual, 1L, 10L);
@@ -131,6 +144,7 @@ public class FluxRangeTest {
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
 		test.request(123);
 		assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(123);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.clear();

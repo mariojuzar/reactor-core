@@ -18,19 +18,25 @@ package reactor.core.publisher;
 
 import java.util.List;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.reactivestreams.Subscription;
+import reactor.core.CoreSubscriber;
+import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 public class FluxRepeatPredicateTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void predicateNull() {
-		Flux.never()
-		    .repeat(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never()
+					.repeat(null);
+		});
 	}
 
 	@Test
@@ -161,4 +167,29 @@ public class FluxRepeatPredicateTest {
 
 		assertThat(result).containsExactlyElementsOf(expected);
 	}
+
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxRepeatPredicate<Integer> test = new FluxRepeatPredicate<>(parent, () -> true);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
+	public void scanSubscriber(){
+		Flux<Integer> source = Flux.just(1);
+		CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
+		FluxRepeatPredicate.RepeatPredicateSubscriber<Integer> test =
+				new FluxRepeatPredicate.RepeatPredicateSubscriber<>(source, actual,  () -> true);
+
+		Subscription parent = Operators.emptySubscription();
+		test.onSubscribe(parent);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
 }

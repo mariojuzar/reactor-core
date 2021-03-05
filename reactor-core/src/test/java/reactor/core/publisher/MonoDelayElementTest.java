@@ -24,11 +24,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.reactivestreams.Subscription;
 
 import reactor.core.CoreSubscriber;
-import reactor.core.Exceptions;
 import reactor.core.Scannable;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
@@ -53,6 +53,17 @@ public class MonoDelayElementTest {
 				defaultSchedulerForDelay()).log())
 	                .expectSubscription()
 	                .expectNoEvent(Duration.ofSeconds(2))
+	                .expectNext("foo")
+	                .verifyComplete();
+	}
+
+	@Test
+	public void subMillisDelay() {
+		Mono<String> source = Mono.just("foo");
+
+		StepVerifier.withVirtualTime(() -> source.delayElement(Duration.ofNanos(5000L)).log())
+	                .expectSubscription()
+	                .expectNoEvent(Duration.ofNanos(5000L))
 	                .expectNext("foo")
 	                .verifyComplete();
 	}
@@ -103,7 +114,8 @@ public class MonoDelayElementTest {
 		assertThat(cancelled.get()).isTrue();
 	}
 
-	@Test(timeout = 5000L)
+	@Test
+	@Timeout(5)
 	public void emptyIsImmediate() {
 		Mono<String> source = Mono.<String>empty().log().hide();
 
@@ -174,7 +186,7 @@ public class MonoDelayElementTest {
 		            .verify();
 
 		vts.advanceTimeBy(Duration.ofHours(1));
-		assertThat(upstreamCancelCount.get()).isEqualTo(1);
+		assertThat(upstreamCancelCount).hasValue(1);
 	}
 
 	@Test
@@ -252,7 +264,7 @@ public class MonoDelayElementTest {
 		finally {
 			Hooks.resetOnNextDropped();
 		}
-		assertThat(dropped.get()).isEqualTo("bar");
+		assertThat(dropped).hasValue("bar");
 	}
 
 	@Test
@@ -343,10 +355,10 @@ public class MonoDelayElementTest {
 		            .expectNext("foo")
 		            .verifyComplete();
 
-		assertThat(onTerminate.get()).isEqualTo(1);
-		assertThat(sourceOnTerminate.get()).isEqualTo(1);
-		assertThat(onCancel.get()).isEqualTo(0);
-		assertThat(sourceOnCancel.get()).isEqualTo(0);
+		assertThat(onTerminate).hasValue(1);
+		assertThat(sourceOnTerminate).hasValue(1);
+		assertThat(onCancel).hasValue(0);
+		assertThat(sourceOnCancel).hasValue(0);
 	}
 
 	@Test
@@ -354,6 +366,7 @@ public class MonoDelayElementTest {
 		MonoDelayElement<String> test = new MonoDelayElement<>(Mono.empty(), 1, TimeUnit.SECONDS, Schedulers.immediate());
 
 		assertThat(test.scan(Scannable.Attr.RUN_ON)).isSameAs(Schedulers.immediate());
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
 	}
 
 	@Test
@@ -366,6 +379,7 @@ public class MonoDelayElementTest {
 
 		assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(Integer.MAX_VALUE);
 		assertThat(test.scan(Scannable.Attr.RUN_ON)).isSameAs(Schedulers.single());
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.ASYNC);
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);

@@ -16,23 +16,30 @@
 package reactor.core.publisher;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.subscriber.AssertSubscriber;
 
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 public class FluxTakeUntilPredicateTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new FluxTakeUntil<>(null, v -> true);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxTakeUntil<>(null, v -> true);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void predicateNull() {
-		Flux.never()
-		    .takeUntil(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never()
+					.takeUntil(null);
+		});
 	}
 
 	@Test
@@ -160,6 +167,15 @@ public class FluxTakeUntilPredicateTest {
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxTakeUntil<Integer> test = new FluxTakeUntil<>(parent, v -> true);
+
+		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanPredicateSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxTakeUntil.TakeUntilPredicateSubscriber<Integer> test =
@@ -169,6 +185,7 @@ public class FluxTakeUntilPredicateTest {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+        Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         Assertions.assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.onComplete();

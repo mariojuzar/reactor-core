@@ -20,13 +20,17 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.test.publisher.FluxOperatorTest;
 import reactor.test.subscriber.AssertSubscriber;
+
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class FluxSkipWhileTest extends FluxOperatorTest<String, String> {
 
@@ -53,15 +57,19 @@ public class FluxSkipWhileTest extends FluxOperatorTest<String, String> {
 	}
 
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new FluxSkipWhile<>(null, v -> true);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxSkipWhile<>(null, v -> true);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void predicateNull() {
-		Flux.never()
-		    .skipWhile(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never()
+					.skipWhile(null);
+		});
 	}
 
 	@Test
@@ -198,6 +206,30 @@ public class FluxSkipWhileTest extends FluxOperatorTest<String, String> {
 		            .verifyComplete();
 	}
 
+	// see https://github.com/reactor/reactor-core/issues/2578
+	@Test
+	@Timeout(5L)
+	public void conditionalOptimization() {
+		StepVerifier.create(
+				Flux.range(1, 5)
+						.skipWhile(v -> v < 2)
+						.flatMap(v -> Mono.just(v), 1) // to request just 1 item
+		)
+				.expectNext(2, 3, 4, 5)
+				.verifyComplete();
+	}
+
+
+
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxSkipWhile<Integer> test = new FluxSkipWhile<>(parent, p -> true);
+
+		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
 	@Test
     public void scanSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
@@ -207,6 +239,7 @@ public class FluxSkipWhileTest extends FluxOperatorTest<String, String> {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         Assertions.assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.onComplete();

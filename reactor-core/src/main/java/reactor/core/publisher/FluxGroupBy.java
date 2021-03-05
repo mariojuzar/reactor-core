@@ -91,6 +91,12 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 		return prefetch;
 	}
 
+	@Override
+	public Object scanUnsafe(Attr key) {
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
+	}
+
 	static final class GroupByMain<T, K, V>
 			implements QueueSubscription<GroupedFlux<K, V>>,
 			           InnerOperator<T, GroupedFlux<K, V>> {
@@ -240,6 +246,7 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			if (key == Attr.BUFFERED) return queue.size();
 			if (key == Attr.CANCELLED) return cancelled == 1;
 			if (key == Attr.ERROR) return error;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 			return InnerOperator.super.scanUnsafe(key);
 		}
@@ -508,6 +515,7 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 		volatile boolean outputFused;
 
 		int produced;
+		boolean isFirstRequest = true;
 
 		UnicastGroupedFlux(K key,
 				Queue<V> queue,
@@ -565,7 +573,16 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 				if (e != 0) {
 					GroupByMain<?, K, V> main = parent;
 					if (main != null) {
-						main.s.request(e);
+						if (this.isFirstRequest) {
+							this.isFirstRequest = false;
+							long toRequest = e - 1;
+
+							if (toRequest > 0) {
+								main.s.request(toRequest);
+							}
+						} else {
+							main.s.request(e);
+						}
 					}
 					if (r != Long.MAX_VALUE) {
 						REQUESTED.addAndGet(this, -e);
@@ -744,7 +761,16 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 				produced = 0;
 				GroupByMain<?, K, V> main = parent;
 				if (main != null) {
-					main.s.request(p);
+					if (this.isFirstRequest) {
+						this.isFirstRequest = false;
+						p--;
+
+						if (p > 0) {
+							main.s.request(p);
+						}
+					} else {
+						main.s.request(p);
+					}
 				}
 			}
 		}
@@ -786,6 +812,7 @@ final class FluxGroupBy<T, K, V> extends InternalFluxOperator<T, GroupedFlux<K, 
 			if (key == Attr.ERROR) return error;
 			if (key == Attr.BUFFERED) return queue != null ? queue.size() : 0;
 			if (key == Attr.REQUESTED_FROM_DOWNSTREAM) return requested;
+			if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
 
 			return InnerProducer.super.scanUnsafe(key);
 		}

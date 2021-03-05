@@ -19,7 +19,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Operators;
@@ -709,7 +709,7 @@ public class StepVerifierAssertionsTests {
 
 	@Test
 	public void contextDiscardCaptureWithNoInitialContext() {
-		StepVerifier.create(Mono.subscriberContext()
+		StepVerifier.create(Mono.deferContextual(Mono::just)
 		                        .flatMapIterable(ctx -> ctx.stream()
 		                                                   .map(Map.Entry::getKey)
 		                                                   .map(String::valueOf)
@@ -726,7 +726,7 @@ public class StepVerifierAssertionsTests {
 	@Test
 	public void contextDiscardCaptureWithInitialContext() {
 		Context initial = Context.of("foo", "bar");
-		StepVerifier.create(Mono.subscriberContext()
+		StepVerifier.create(Mono.deferContextual(Mono::just)
 				.flatMapIterable(ctx -> ctx.stream()
 				                           .map(Map.Entry::getKey)
 				                           .map(String::valueOf)

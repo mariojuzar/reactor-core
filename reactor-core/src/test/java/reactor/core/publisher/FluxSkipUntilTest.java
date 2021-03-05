@@ -15,11 +15,13 @@
  */
 package reactor.core.publisher;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
@@ -67,6 +69,28 @@ public class FluxSkipUntilTest extends FluxOperatorTest<String, String> {
 		            .verifyComplete();
 	}
 
+	// see https://github.com/reactor/reactor-core/issues/2578
+	@Test
+	@Timeout(5L)
+	public void conditionalOptimization() {
+		StepVerifier.create(
+				Flux.range(1, 5)
+						.skipUntil(v -> v > 1)
+						.flatMap(v -> Mono.just(v), 1) // to request just 1 item
+		)
+				.expectNext(2, 3, 4, 5)
+				.verifyComplete();
+	}
+
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxSkipUntil<Integer> test = new FluxSkipUntil<>(parent, p -> true);
+
+		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
 	@Test
     public void scanSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
@@ -76,6 +100,7 @@ public class FluxSkipUntilTest extends FluxOperatorTest<String, String> {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         Assertions.assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.onComplete();

@@ -16,7 +16,7 @@
 
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import reactor.core.Scannable;
 import reactor.test.StepVerifier;
 import reactor.util.concurrent.Queues;
@@ -48,6 +48,7 @@ public class ParallelConcatMapTest {
 		assertThat(test.scan(Scannable.Attr.PREFETCH))
 				.isEqualTo(123)
 				.isNotEqualTo(source.getPrefetch());
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.DELAY_ERROR)).isFalse();
 	}

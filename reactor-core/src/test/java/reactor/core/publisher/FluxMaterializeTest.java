@@ -19,8 +19,7 @@ package reactor.core.publisher;
 import java.util.Arrays;
 import java.util.List;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
@@ -29,6 +28,7 @@ import reactor.test.publisher.FluxOperatorTest;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxMaterializeTest
 		extends FluxOperatorTest<String, Signal<String>> {
@@ -66,21 +66,16 @@ public class FluxMaterializeTest
 								                      m.poll();
 								                      m.size();
 
-								                      try{
-									                      m.offer(null);
-									                      Assert.fail();
-								                      }
-								                      catch (UnsupportedOperationException u){
-									                      //ignore
-								                      }
-
-								                      try{
-									                      m.iterator();
-									                      Assert.fail();
-								                      }
-								                      catch (UnsupportedOperationException u){
-									                      //ignore
-								                      }
+													  assertThatExceptionOfType(UnsupportedOperationException.class)
+															  .as("m.offer(null)")
+															  .isThrownBy(() -> {
+																  m.offer(null);
+															  });
+													  assertThatExceptionOfType(UnsupportedOperationException.class)
+															  .as("m.iterator()")
+															  .isThrownBy(() -> {
+														  m.iterator();
+													  });
 							                      }
 						                      })
 						                      .verifyComplete())
@@ -162,6 +157,15 @@ public class FluxMaterializeTest
 		            .verifyComplete();
 	}
 
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxMaterialize<Integer> test = new FluxMaterialize<>(parent);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
     @Test
     public void scanSubscriber() {
         CoreSubscriber<Signal<String>> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
@@ -174,6 +178,7 @@ public class FluxMaterializeTest
         test.requested = 35;
         assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(35);
         assertThat(test.scan(Scannable.Attr.BUFFERED)).isEqualTo(0); // RS: TODO non-zero size
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
         test.terminalSignal = Signal.error(new IllegalStateException("boom"));

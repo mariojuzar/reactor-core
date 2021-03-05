@@ -20,17 +20,19 @@ import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
-import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Stream;
 
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
+
 import reactor.core.CoreSubscriber;
 import reactor.core.Exceptions;
 import reactor.core.Fuseable;
 import reactor.core.Scannable;
+import reactor.core.publisher.Sinks.EmitResult;
 import reactor.util.annotation.Nullable;
 import reactor.util.concurrent.Queues;
+import reactor.util.context.Context;
 
 import static reactor.core.publisher.FluxPublish.PublishSubscriber.TERMINATED;
 
@@ -50,8 +52,18 @@ import static reactor.core.publisher.FluxPublish.PublishSubscriber.TERMINATED;
  * @param <T> the input and output value type
  *
  * @author Stephane Maldini
+ * @deprecated To be removed in 3.5. Prefer clear cut usage of {@link Sinks} through
+ * variations of {@link Sinks.MulticastSpec#onBackpressureBuffer() Sinks.many().multicast().onBackpressureBuffer()}.
+ * This processor was blocking in {@link EmitterProcessor#onNext(Object)}.
+ * This behaviour can be implemented with the {@link Sinks} API by calling
+ * {@link Sinks.Many#tryEmitNext(Object)} and retrying, e.g.:
+ * <pre>{@code while (sink.tryEmitNext(v).hasFailed()) {
+ *     LockSupport.parkNanos(10);
+ * }
+ * }</pre>
  */
-public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
+@Deprecated
+public final class EmitterProcessor<T> extends FluxProcessor<T, T> implements InternalManySink<T> {
 
 	@SuppressWarnings("rawtypes")
 	static final FluxPublish.PubSubInner[] EMPTY = new FluxPublish.PublishInner[0];
@@ -63,7 +75,10 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 	 * @param <E> Type of processed signals
 	 *
 	 * @return a fresh processor
+	 * @deprecated use {@link Sinks.MulticastSpec#onBackpressureBuffer() Sinks.many().multicast().onBackpressureBuffer()}
+	 * (or the unsafe variant if you're sure about external synchronization). To be removed in 3.5.
 	 */
+	@Deprecated
 	public static <E> EmitterProcessor<E> create() {
 		return create(Queues.SMALL_BUFFER_SIZE, true);
 	}
@@ -76,7 +91,11 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 	 * @param autoCancel automatically cancel
 	 *
 	 * @return a fresh processor
+	 * @deprecated use {@link Sinks.MulticastSpec#onBackpressureBuffer(int, boolean) Sinks.many().multicast().onBackpressureBuffer(bufferSize, boolean)}
+	 * using the old default of {@link Queues#SMALL_BUFFER_SIZE} for the {@code bufferSize}
+	 * (or the unsafe variant if you're sure about external synchronization). To be removed in 3.5.
 	 */
+	@Deprecated
 	public static <E> EmitterProcessor<E> create(boolean autoCancel) {
 		return create(Queues.SMALL_BUFFER_SIZE, autoCancel);
 	}
@@ -88,7 +107,10 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 	 * @param bufferSize the internal buffer size to hold signals
 	 *
 	 * @return a fresh processor
+	 * @deprecated use {@link Sinks.MulticastSpec#onBackpressureBuffer(int) Sinks.many().multicast().onBackpressureBuffer(bufferSize)}
+	 * (or the unsafe variant if you're sure about external synchronization). To be removed in 3.5.
 	 */
+	@Deprecated
 	public static <E> EmitterProcessor<E> create(int bufferSize) {
 		return create(bufferSize, true);
 	}
@@ -101,7 +123,10 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 	 * @param autoCancel automatically cancel
 	 *
 	 * @return a fresh processor
+	 * @deprecated use {@link Sinks.MulticastSpec#onBackpressureBuffer(int, boolean) Sinks.many().multicast().onBackpressureBuffer(bufferSize, autoCancel)}
+	 * (or the unsafe variant if you're sure about external synchronization). To be removed in 3.5.
 	 */
+	@Deprecated
 	public static <E> EmitterProcessor<E> create(int bufferSize, boolean autoCancel) {
 		return new EmitterProcessor<>(autoCancel, bufferSize);
 	}
@@ -163,6 +188,11 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 	}
 
 	@Override
+	public Context currentContext() {
+		return Operators.multiSubscribersContext(subscribers);
+	}
+
+	@Override
 	public void subscribe(CoreSubscriber<? super T> actual) {
 		Objects.requireNonNull(actual, "subscribe");
 		EmitterInner<T> inner = new EmitterInner<>(actual, this);
@@ -189,6 +219,102 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 		}
 	}
 
+	@Override
+	public void onComplete() {
+		//no particular error condition handling for onComplete
+		@SuppressWarnings("unused") EmitResult emitResult = tryEmitComplete();
+	}
+
+	@Override
+	public EmitResult tryEmitComplete() {
+		if (done) {
+			return EmitResult.FAIL_TERMINATED;
+		}
+		done = true;
+		drain();
+		return EmitResult.OK;
+	}
+
+	@Override
+	public void onError(Throwable throwable) {
+		emitError(throwable, Sinks.EmitFailureHandler.FAIL_FAST);
+	}
+
+	@Override
+	public EmitResult tryEmitError(Throwable t) {
+		Objects.requireNonNull(t, "onError");
+		if (done) {
+			return EmitResult.FAIL_TERMINATED;
+		}
+		if (Exceptions.addThrowable(ERROR, this, t)) {
+			done = true;
+			drain();
+			return EmitResult.OK;
+		}
+		else {
+			return Sinks.EmitResult.FAIL_TERMINATED;
+		}
+	}
+
+	@Override
+	public void onNext(T t) {
+		if (sourceMode == Fuseable.ASYNC) {
+			drain();
+			return;
+		}
+		emitNext(t, Sinks.EmitFailureHandler.FAIL_FAST);
+	}
+
+	@Override
+	public EmitResult tryEmitNext(T t) {
+		if (done) {
+			return Sinks.EmitResult.FAIL_TERMINATED;
+		}
+
+		Objects.requireNonNull(t, "onNext");
+
+		Queue<T> q = queue;
+
+		if (q == null) {
+			if (Operators.setOnce(S, this, Operators.emptySubscription())) {
+				q = Queues.<T>get(prefetch).get();
+				queue = q;
+			}
+			else {
+				for (; ; ) {
+					if (isCancelled()) {
+						return EmitResult.FAIL_CANCELLED;
+					}
+					q = queue;
+					if (q != null) {
+						break;
+					}
+				}
+			}
+		}
+
+		if (!q.offer(t)) {
+			return subscribers == EMPTY ? EmitResult.FAIL_ZERO_SUBSCRIBER : EmitResult.FAIL_OVERFLOW;
+		}
+		drain();
+		return EmitResult.OK;
+	}
+
+	@Override
+	public int currentSubscriberCount() {
+		return subscribers.length;
+	}
+
+	@Override
+	public Flux<T> asFlux() {
+		return this;
+	}
+
+	@Override
+	protected boolean isIdentityProcessor() {
+		return true;
+	}
+
 	/**
 	 * Return the number of parked elements in the emitter backlog.
 	 *
@@ -197,6 +323,11 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 	public int getPending() {
 		Queue<T> q = queue;
 		return q != null ? q.size() : 0;
+	}
+
+	@Override
+	public boolean isDisposed() {
+		return isTerminated() || isCancelled();
 	}
 
 	@Override
@@ -225,72 +356,6 @@ public final class EmitterProcessor<T> extends FluxProcessor<T, T> {
 
 			s.request(Operators.unboundedOrPrefetch(prefetch));
 		}
-	}
-
-	@Override
-	@SuppressWarnings("unchecked")
-	public void onNext(T t) {
-		if (done) {
-			Operators.onNextDropped(t, currentContext());
-			return;
-		}
-
-		if (sourceMode == Fuseable.ASYNC) {
-			drain();
-			return;
-		}
-
-		Objects.requireNonNull(t, "onNext");
-
-		Queue<T> q = queue;
-
-		if (q == null) {
-			if (Operators.setOnce(S, this, Operators.emptySubscription())) {
-				q = Queues.<T>get(prefetch).get();
-				queue = q;
-			}
-			else {
-				for (; ; ) {
-					if (isDisposed()) {
-						return;
-					}
-					q = queue;
-					if (q != null) {
-						break;
-					}
-				}
-			}
-		}
-
-		while (!q.offer(t)) {
-			LockSupport.parkNanos(10);
-		}
-		drain();
-	}
-
-	@Override
-	public void onError(Throwable t) {
-		Objects.requireNonNull(t, "onError");
-		if (done) {
-			Operators.onErrorDropped(t, currentContext());
-			return;
-		}
-		if (Exceptions.addThrowable(ERROR, this, t)) {
-			done = true;
-			drain();
-		}
-		else {
-			Operators.onErrorDroppedMulticast(t);
-		}
-	}
-
-	@Override
-	public void onComplete() {
-		if (done) {
-			return;
-		}
-		done = true;
-		drain();
 	}
 
 	@Override

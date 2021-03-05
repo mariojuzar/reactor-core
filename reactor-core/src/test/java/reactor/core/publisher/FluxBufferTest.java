@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
@@ -32,6 +32,7 @@ import reactor.test.publisher.FluxOperatorTest;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxBufferTest extends FluxOperatorTest<String, List<String>> {
 
@@ -96,24 +97,32 @@ public class FluxBufferTest extends FluxOperatorTest<String, List<String>> {
 		);
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new FluxBuffer<>(null, 1, ArrayList::new);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxBuffer<>(null, 1, ArrayList::new);
+		});
 	}
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void supplierNull() {
-		Flux.never().buffer(1, 1, null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.never().buffer(1, 1, null);
+		});
 	}
 
-	@Test(expected = IllegalArgumentException.class)
+	@Test
 	public void sizeZero() {
-		Flux.never().buffer(0, 1);
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Flux.never().buffer(0, 1);
+		});
 	}
 
-	@Test(expected = IllegalArgumentException.class)
+	@Test
 	public void skipZero() {
-		Flux.never().buffer(1, 0);
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Flux.never().buffer(1, 0);
+		});
 	}
 
 	@Test
@@ -441,6 +450,13 @@ public class FluxBufferTest extends FluxOperatorTest<String, List<String>> {
 	}
 
 	@Test
+	public void scanOperator(){
+	    FluxBuffer<Integer, List<Integer>> test = new FluxBuffer<>(Flux.just(1, 2, 3), 2, 1, ArrayList::new);
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
 	public void scanExactSubscriber() {
 		CoreSubscriber<? super List> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
 		FluxBuffer.BufferExactSubscriber<String, List<String>> test = new FluxBuffer.BufferExactSubscriber<>(
@@ -455,6 +471,7 @@ public class FluxBufferTest extends FluxOperatorTest<String, List<String>> {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 
@@ -484,6 +501,7 @@ public class FluxBufferTest extends FluxOperatorTest<String, List<String>> {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
@@ -527,6 +545,7 @@ public class FluxBufferTest extends FluxOperatorTest<String, List<String>> {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
 		test.onError(new IllegalStateException("boom"));

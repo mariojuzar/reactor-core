@@ -22,10 +22,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
+
 import reactor.core.CoreSubscriber;
 import reactor.core.Exceptions;
 import reactor.core.Scannable;
@@ -34,8 +35,9 @@ import reactor.test.StepVerifierOptions;
 import reactor.test.publisher.TestPublisher;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.*;
+import static org.assertj.core.api.Assertions.*;
 import static reactor.core.publisher.BufferOverflowStrategy.*;
+import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
 
 public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
                                                              BiFunction<Throwable, Object, Throwable> {
@@ -56,7 +58,7 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		return throwable;
 	}
 
-	@Before
+	@BeforeEach
 	public void before() {
 		this.droppedValue = null;
 		this.hookCapturedError = null;
@@ -64,7 +66,7 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		Hooks.onOperatorError(this);
 	}
 
-	@After
+	@AfterEach
 	public void after() {
 		Hooks.resetOnOperatorError();
 	}
@@ -102,19 +104,19 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 
 	@Test
 	public void drop() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
 		FluxOnBackpressureBufferStrategy<String> flux = new FluxOnBackpressureBufferStrategy<>(
-				processor, 2, this, DROP_LATEST);
+				processor.asFlux(), 2, this, DROP_LATEST);
 
 		StepVerifier.create(flux, 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -123,26 +125,26 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectComplete()
 		            .verify();
 
-		assertEquals("over3", droppedValue);
-		assertNull("unexpected hookCapturedValue", hookCapturedValue);
-		assertNull("unexpected hookCapturedError",hookCapturedError);
+		assertThat(droppedValue).isEqualTo("over3");
+		assertThat(hookCapturedValue).as("hookCapturedValue").isNull();
+		assertThat(hookCapturedError).as("hookCapturedError").isNull();
 	}
 
 	@Test
 	public void dropOldest() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
 		FluxOnBackpressureBufferStrategy<String> flux = new FluxOnBackpressureBufferStrategy<>(
-				processor, 2, this, DROP_OLDEST);
+				processor.asFlux(), 2, this, DROP_OLDEST);
 
 		StepVerifier.create(flux, 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -151,26 +153,26 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectComplete()
 		            .verify();
 
-		assertEquals("over1", droppedValue);
-		assertNull("unexpected hookCapturedValue",hookCapturedValue);
-		assertNull("unexpected hookCapturedError",hookCapturedError);
+		assertThat(droppedValue).isEqualTo("over1");
+		assertThat(hookCapturedValue).as("unexpected hookCapturedValue").isNull();
+		assertThat(hookCapturedError).as("unexpected hookCapturedError").isNull();
 	}
 
 	@Test
 	public void error() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
 		FluxOnBackpressureBufferStrategy<String> flux = new FluxOnBackpressureBufferStrategy<>(
-				processor, 2, this, ERROR);
+				processor.asFlux(), 2, this, ERROR);
 
 		StepVerifier.create(flux, 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -179,9 +181,9 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectErrorMessage("The receiver is overrun by more signals than expected (bounded queue...)")
 		            .verify();
 
-		assertEquals("over3", droppedValue);
-		assertEquals("over3", hookCapturedValue);
-		assertTrue("unexpected hookCapturedError: " + hookCapturedError, hookCapturedError instanceof IllegalStateException);
+		assertThat(droppedValue).isEqualTo("over3");
+		assertThat(hookCapturedValue).isEqualTo("over3");
+		assertThat(hookCapturedError).as("unexpected hookCapturedError type").isInstanceOf(IllegalStateException.class);
 	}
 
 	//the 3 onBackpressureBufferMaxCallbackOverflow are similar to the tests above, except they use the public API
@@ -195,7 +197,7 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 
 		            .thenRequest(7)
 		            .expectNext(1, 2, 3, 4, 5, 6, 7)
-		            .then(() -> assertThat(last.get()).isEqualTo(16))
+		            .then(() -> assertThat(last).hasValue(16))
 		            .thenRequest(9)
 		            .expectNextCount(8)
 		            .verifyErrorMatches(Exceptions::isOverflow);
@@ -212,7 +214,7 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 
 		            .thenRequest(7)
 		            .expectNext(1, 2, 3, 4, 5, 6, 7)
-		            .then(() -> assertThat(last.get()).isEqualTo(92))
+		            .then(() -> assertThat(last).hasValue(92))
 		            .thenRequest(9)
 		            .expectNext(93, 94, 95, 96, 97, 98, 99, 100)
 		            .verifyComplete();
@@ -229,7 +231,7 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 
 		            .thenRequest(7)
 		            .expectNext(1, 2, 3, 4, 5, 6, 7)
-		            .then(() -> assertThat(last.get()).isEqualTo(100))
+		            .then(() -> assertThat(last).hasValue(100))
 		            .thenRequest(9)
 		            .expectNext(8, 9, 10, 11, 12, 13, 14, 15)
 		            .verifyComplete();
@@ -263,20 +265,20 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 
 	@Test
 	public void dropCallbackError() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
 		FluxOnBackpressureBufferStrategy<String> flux = new FluxOnBackpressureBufferStrategy<>(
-				processor, 2, v -> { throw new IllegalArgumentException("boom"); },
+				processor.asFlux(), 2, v -> { throw new IllegalArgumentException("boom"); },
 				DROP_LATEST);
 
 		StepVerifier.create(flux, 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -285,28 +287,28 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectErrorMessage("boom")
 		            .verify();
 
-		assertNull("unexpected droppedValue", droppedValue);
-		assertEquals("over3", hookCapturedValue);
-		assertTrue("unexpected hookCapturedError: " + hookCapturedError, hookCapturedError instanceof IllegalArgumentException);
-		assertEquals("boom", hookCapturedError.getMessage());
+		assertThat(droppedValue).as("unexpected droppedValue").isNull();
+		assertThat(hookCapturedValue).isEqualTo("over3");
+		assertThat(hookCapturedError).as("unexpected hookCapturedError type").isInstanceOf(IllegalArgumentException.class);
+		assertThat(hookCapturedError).hasMessage("boom");
 	}
 
 	@Test
 	public void dropOldestCallbackError() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
 		FluxOnBackpressureBufferStrategy<String> flux = new FluxOnBackpressureBufferStrategy<>(
-				processor, 2, v -> { throw new IllegalArgumentException("boom"); },
+				processor.asFlux(), 2, v -> { throw new IllegalArgumentException("boom"); },
 				DROP_OLDEST);
 
 		StepVerifier.create(flux, 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -315,28 +317,28 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectErrorMessage("boom")
 		            .verify();
 
-		assertNull("unexpected droppedValue", droppedValue);
-		assertEquals("over1", hookCapturedValue);
-		assertTrue("unexpected hookCapturedError: " + hookCapturedError, hookCapturedError instanceof IllegalArgumentException);
-		assertEquals("boom", hookCapturedError.getMessage());
+		assertThat(droppedValue).as("unexpected droppedValue").isNull();
+		assertThat(hookCapturedValue).isEqualTo("over1");
+		assertThat(hookCapturedError).as("unexpected hookCapturedError type").isInstanceOf(IllegalArgumentException.class);
+		assertThat(hookCapturedError).hasMessage("boom");
 	}
 
 	@Test
 	public void errorCallbackError() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
 		FluxOnBackpressureBufferStrategy<String> flux = new FluxOnBackpressureBufferStrategy<>(
-				processor, 2, v -> { throw new IllegalArgumentException("boom"); },
+				processor.asFlux(), 2, v -> { throw new IllegalArgumentException("boom"); },
 				ERROR);
 
 		StepVerifier.create(flux, 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -345,28 +347,28 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectErrorMessage("boom")
 		            .verify();
 
-		assertNull("unexpected droppedValue", droppedValue);
-		assertEquals("over3", hookCapturedValue);
-		assertTrue("unexpected hookCapturedError: " + hookCapturedError, hookCapturedError instanceof IllegalArgumentException);
-		assertEquals("boom", hookCapturedError.getMessage());
+		assertThat(droppedValue).as("unexpected droppedValue").isNull();
+		assertThat(hookCapturedValue).isEqualTo("over3");
+		assertThat(hookCapturedError).as("unexpected hookCapturedError type").isInstanceOf(IllegalArgumentException.class);
+		assertThat(hookCapturedError).hasMessage("boom");
 	}
 
 	@Test
 	public void noCallbackWithErrorStrategyOverflowsAfterDrain() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
 		FluxOnBackpressureBufferStrategy<String> flux = new FluxOnBackpressureBufferStrategy<>(
-				processor, 2, null, ERROR);
+				processor.asFlux(), 2, null, ERROR);
 
 		StepVerifier.create(flux, 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onNext("over4");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitNext("over4", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -375,27 +377,27 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectErrorMatches(Exceptions::isOverflow)
 		            .verify();
 
-		assertNull("unexpected droppedValue", droppedValue);
-		assertEquals("over3", hookCapturedValue);
-		assertTrue("unexpected hookCapturedError: " + hookCapturedError, hookCapturedError instanceof IllegalStateException);
-		assertEquals("The receiver is overrun by more signals than expected (bounded queue...)", hookCapturedError.getMessage());
+		assertThat(droppedValue).as("unexpected droppedValue").isNull();
+		assertThat(hookCapturedValue).isEqualTo("over3");
+		assertThat(hookCapturedError).as("unexpected hookCapturedError type").isInstanceOf(IllegalStateException.class);
+		assertThat(hookCapturedError).hasMessage("The receiver is overrun by more signals than expected (bounded queue...)");
 	}
 
 	@Test
 	public void noCallbackWithDropStrategyNoError() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
 		FluxOnBackpressureBufferStrategy<String> flux = new FluxOnBackpressureBufferStrategy<>(
-				processor, 2, null, DROP_LATEST);
+				processor.asFlux(), 2, null, DROP_LATEST);
 
 		StepVerifier.create(flux, 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -404,26 +406,26 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectComplete()
 		            .verify();
 
-		assertNull("unexpected droppedValue", droppedValue);
-		assertNull("unexpected hookCapturedValue", hookCapturedValue);
-		assertNull("unexpected hookCapturedError",hookCapturedError);
+		assertThat(droppedValue).as("unexpected droppedValue").isNull();
+		assertThat(hookCapturedValue).as("unexpected hookCapturedValue").isNull();
+		assertThat(hookCapturedError).as("unexpected hookCapturedError").isNull();
 	}
 
 	@Test
 	public void noCallbackWithDropOldestStrategyNoError() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
 		FluxOnBackpressureBufferStrategy<String> flux = new FluxOnBackpressureBufferStrategy<>(
-				processor, 2, null, DROP_OLDEST);
+				processor.asFlux(), 2, null, DROP_OLDEST);
 
 		StepVerifier.create(flux, 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -432,23 +434,23 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectComplete()
 		            .verify();
 
-		assertNull("unexpected droppedValue", droppedValue);
-		assertNull("unexpected hookCapturedValue",hookCapturedValue);
-		assertNull("unexpected hookCapturedError",hookCapturedError);
+		assertThat(droppedValue).as("unexpected droppedValue").isNull();
+		assertThat(hookCapturedValue).as("unexpected hookCapturedValue").isNull();
+		assertThat(hookCapturedError).as("unexpected hookCapturedError").isNull();
 	}
 
 	@Test
 	public void fluxOnBackpressureBufferStrategyNoCallback() {
-		DirectProcessor<String> processor = DirectProcessor.create();
+		Sinks.Many<String> processor = Sinks.unsafe().many().multicast().directBestEffort();
 
-		StepVerifier.create(processor.onBackpressureBuffer(2, DROP_OLDEST), 0)
+		StepVerifier.create(processor.asFlux().onBackpressureBuffer(2, DROP_OLDEST), 0)
 		            .thenRequest(1)
 		            .then(() -> {
-			            processor.onNext("normal");
-			            processor.onNext("over1");
-			            processor.onNext("over2");
-			            processor.onNext("over3");
-			            processor.onComplete();
+			            processor.emitNext("normal", FAIL_FAST);
+			            processor.emitNext("over1", FAIL_FAST);
+			            processor.emitNext("over2", FAIL_FAST);
+			            processor.emitNext("over3", FAIL_FAST);
+			            processor.emitComplete(FAIL_FAST);
 		            })
 		            .expectNext("normal")
 		            .thenAwait()
@@ -457,9 +459,9 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 		            .expectComplete()
 		            .verify();
 
-		assertNull("unexpected droppedValue", droppedValue);
-		assertNull("unexpected hookCapturedValue",hookCapturedValue);
-		assertNull("unexpected hookCapturedError",hookCapturedError);
+		assertThat(droppedValue).as("unexpected droppedValue").isNull();
+		assertThat(hookCapturedValue).as("unexpected hookCapturedValue").isNull();
+		assertThat(hookCapturedError).as("unexpected hookCapturedError").isNull();
 	}
 
 	@Test
@@ -471,7 +473,7 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 			fail("expected NullPointerException");
 		}
 		catch (NullPointerException e) {
-			assertEquals("onBufferOverflow", e.getMessage());
+			assertThat(e).hasMessage("onBufferOverflow");
 		}
 	}
 
@@ -484,8 +486,17 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
 			fail("expected NullPointerException");
 		}
 		catch (NullPointerException e) {
-			assertEquals("bufferOverflowStrategy", e.getMessage());
+			assertThat(e).hasMessage("bufferOverflowStrategy");
 		}
+	}
+
+	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxOnBackpressureBufferStrategy<Integer> test = new FluxOnBackpressureBufferStrategy<>(parent, 3, t -> {}, ERROR);
+
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -505,6 +516,7 @@ public class FluxOnBackpressureBufferStrategyTest implements Consumer<String>,
         assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(Integer.MAX_VALUE);
         test.offer(9);
         assertThat(test.scan(Scannable.Attr.BUFFERED)).isEqualTo(1);
+        assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
         assertThat(test.scan(Scannable.Attr.ERROR)).isNull();
         assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();

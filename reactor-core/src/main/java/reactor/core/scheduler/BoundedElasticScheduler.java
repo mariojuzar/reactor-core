@@ -129,12 +129,7 @@ final class BoundedElasticScheduler implements Scheduler, Scannable {
 		this.clock = Objects.requireNonNull(clock, "A Clock must be provided");
 		this.ttlMillis = ttlMillis;
 
-		this.boundedServices = new BoundedServices(this);
-		this.evictor = Executors.newScheduledThreadPool(1, EVICTOR_FACTORY);
-		evictor.scheduleAtFixedRate(boundedServices::eviction,
-				ttlMillis,
-				ttlMillis,
-				TimeUnit.MILLISECONDS);
+		this.boundedServices = SHUTDOWN; //initially disposed, EVICTOR is also null
 	}
 
 	/**
@@ -148,7 +143,7 @@ final class BoundedElasticScheduler implements Scheduler, Scannable {
 	 * @param ttlSeconds the time-to-live (TTL) of idle threads, in seconds
 	 */
 	BoundedElasticScheduler(int maxThreads, int maxTaskQueuedPerThread, ThreadFactory factory, int ttlSeconds) {
-		this(maxThreads, maxTaskQueuedPerThread, factory, ttlSeconds * 1000,
+		this(maxThreads, maxTaskQueuedPerThread, factory, ttlSeconds * 1000L,
 				Clock.tickSeconds(BoundedServices.ZONE_UTC));
 	}
 
@@ -599,7 +594,7 @@ final class BoundedElasticScheduler implements Scheduler, Scannable {
 	 * <p>Java Standard library unfortunately doesn't provide any {@link
 	 * ScheduledExecutorService} implementations that one can provide a bound on
 	 * the task queue. This shortcoming is prone to hide backpressure problems. See
-	 * <a href="http://cs.oswego.edu/pipermail/concurrency-interest/2019-April/016861.html">the
+	 * <a href="https://cs.oswego.edu/pipermail/concurrency-interest/2019-April/016861.html">the
 	 * relevant concurrency-interest discussion</a> for {@link java.util.concurrent}
 	 * lead Doug Lea's tip for enforcing a bound via {@link
 	 * ScheduledThreadPoolExecutor#getQueue()}.

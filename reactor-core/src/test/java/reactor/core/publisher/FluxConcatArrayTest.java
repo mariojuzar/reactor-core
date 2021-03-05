@@ -18,8 +18,7 @@ package reactor.core.publisher;
 
 import java.util.Arrays;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
@@ -28,12 +27,15 @@ import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxConcatArrayTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void arrayNull() {
-		Flux.concat((Publisher<Object>[]) null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.concat((Publisher<Object>[]) null);
+		});
 	}
 
 	final Publisher<Integer> source = Flux.range(1, 3);
@@ -171,10 +173,9 @@ public class FluxConcatArrayTest {
 		Flux<String> f = Flux.concat(Flux.just("test"), Flux.just("test2"))
 		                     .concatWith(Flux.just("test3"));
 
-		Assert.assertTrue(f instanceof FluxConcatArray);
+		assertThat(f).isInstanceOf(FluxConcatArray.class);
 		FluxConcatArray<String> s = (FluxConcatArray<String>) f;
-		Assert.assertTrue(s.array != null);
-		Assert.assertTrue(s.array.length == 3);
+		assertThat(s.array).isNotNull().hasSize(3);
 
 		StepVerifier.create(f)
 	                .expectNext("test", "test2", "test3")
@@ -187,10 +188,9 @@ public class FluxConcatArrayTest {
 		Flux<String> f = Mono.just("test")
 		                     .concatWith(Flux.just("test2"));
 
-		Assert.assertTrue(f instanceof FluxConcatArray);
+		assertThat(f).isInstanceOf(FluxConcatArray.class);
 		FluxConcatArray<String> s = (FluxConcatArray<String>) f;
-		Assert.assertTrue(s.array != null);
-		Assert.assertTrue(s.array.length == 2);
+		assertThat(s.array).isNotNull().hasSize(2);
 
 		StepVerifier.create(f)
 	                .expectNext("test", "test2")
@@ -264,6 +264,28 @@ public class FluxConcatArrayTest {
 		@SuppressWarnings("unchecked") //vararg of Publisher<String>
 		FluxConcatArray<String> s = new FluxConcatArray<>(true, Flux.empty());
 		assertThat(s.scan(Scannable.Attr.DELAY_ERROR)).as("delayError").isTrue();
+		assertThat(s.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
+	public void scanSubscriber() {
+		CoreSubscriber<String> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
+		@SuppressWarnings("unchecked")
+		Publisher<String>[] publishers = (Publisher<String>[]) new Publisher[0];
+		FluxConcatArray.ConcatArraySubscriber<String> test = new FluxConcatArray.ConcatArraySubscriber<>(actual, publishers);
+		Subscription parent = Operators.emptySubscription();
+		test.onSubscribe(parent);
+
+		test.missedRequested = 2;
+		test.requested = 3;
+
+		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+		assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(5L);
+
+		test.cancel();
+		assertThat(test.scan(Scannable.Attr.CANCELLED)).isTrue();
 	}
 
 	@Test
@@ -284,6 +306,7 @@ public class FluxConcatArrayTest {
 		assertThat(test.scan(Scannable.Attr.ERROR)).hasMessage("boom");
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 		assertThat(test.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(5L);
 
 		test.cancel();

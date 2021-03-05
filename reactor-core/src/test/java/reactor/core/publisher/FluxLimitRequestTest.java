@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
@@ -259,6 +259,7 @@ public class FluxLimitRequestTest {
 		assertThat(operator.scan(Scannable.Attr.PARENT)).isSameAs(source);
 		assertThat(operator.scan(Scannable.Attr.REQUESTED_FROM_DOWNSTREAM)).isEqualTo(123L);
 		assertThat(operator.scan(Scannable.Attr.PREFETCH)).isEqualTo(0);
+		assertThat(operator.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 
 	@Test
@@ -271,6 +272,7 @@ public class FluxLimitRequestTest {
 
 		assertThat(inner.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
 		assertThat(inner.scan(Scannable.Attr.PARENT)).isSameAs(s);
+		assertThat(inner.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 		assertThat(inner.scan(Scannable.Attr.TERMINATED)).isFalse();
 
 		inner.onNext("foo");

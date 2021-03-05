@@ -23,8 +23,8 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.*;
 import static reactor.util.context.ContextTest.*;
@@ -33,7 +33,7 @@ public class ContextNTest {
 
 	ContextN c;
 
-	@Before
+	@BeforeEach
 	public void initContext() {
 		c = new ContextN(1, "A", 2, "B", 3, "C",
 			4, "D", 5, "E", 6, "F");
@@ -297,7 +297,7 @@ public class ContextNTest {
 	@Test
 	public void putAllOfContext3() {
 		Context m = Context.of("A", 1, "B", 2, "C", 3);
-		Context put = c.putAll(m);
+		Context put = c.putAll(m.readOnly());
 
 		assertThat(put).isInstanceOf(ContextN.class);
 		assertThat(put.stream().map(Map.Entry::getKey))
@@ -308,7 +308,7 @@ public class ContextNTest {
 	public void putAllOfContextN() {
 		Context m = new ContextN("A", 1, "B", 2, "C", 3,
 				"D", 1, "E", 2, "F", 3);
-		Context put = c.putAll(m);
+		Context put = c.putAll(m.readOnly());
 
 		assertThat(put).isInstanceOf(ContextN.class);
 		assertThat(put.stream().map(Map.Entry::getKey))
@@ -318,7 +318,7 @@ public class ContextNTest {
 	@Test
 	public void putAllReplaces() {
 		Context m = Context.of(1, "replaced", "A", 1);
-		Context put = c.putAll(m);
+		Context put = c.putAll(m.readOnly());
 
 		assertThat(put).isInstanceOf(ContextN.class)
 		               .hasToString("ContextN{1=replaced, 2=B, 3=C, 4=D, 5=E, 6=F, A=1}");
@@ -327,7 +327,7 @@ public class ContextNTest {
 	@Test
 	public void putAllOfEmpty() {
 		Context m = Context.empty();
-		Context put = c.putAll(m);
+		Context put = c.putAll(m.readOnly());
 
 		assertThat(put).isSameAs(c);
 	}
@@ -335,7 +335,7 @@ public class ContextNTest {
 	@Test
 	public void putAllForeign() {
 		ForeignContext other = new ForeignContext("someKey", "someValue");
-		Context result = c.putAll(other);
+		Context result = c.putAll(other.readOnly());
 
 		assertThat(result).isInstanceOf(ContextN.class);
 

@@ -17,12 +17,14 @@ package reactor.core.publisher;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import reactor.core.Scannable;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class MonoSupplierTest {
 
@@ -89,11 +91,19 @@ public class MonoSupplierTest {
 		               .block()).isEqualToIgnoringCase("test");
 	}
 
-	@Test(expected = RuntimeException.class)
+	@Test
 	public void onMonoErrorSupplierOnBlock() {
-		Mono.fromSupplier(() -> {
-			throw new RuntimeException("test");
-		})
-		    .block();
+		assertThatExceptionOfType(RuntimeException.class).isThrownBy(() -> {
+			Mono.fromSupplier(() -> {
+				throw new RuntimeException("test");
+			}).block();
+		});
+	}
+
+	@Test
+	public void scanOperator(){
+		MonoSupplier<String> test = new MonoSupplier<>(() -> "test");
+
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 	}
 }

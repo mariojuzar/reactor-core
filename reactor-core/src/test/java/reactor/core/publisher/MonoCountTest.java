@@ -16,19 +16,22 @@
 
 package reactor.core.publisher;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class MonoCountTest {
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new MonoCount<>(null);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new MonoCount<>(null);
+		});
 	}
 
 	public void normal() {
@@ -58,6 +61,13 @@ public class MonoCountTest {
 	}
 
 	@Test
+	public void scanOperator(){
+	    MonoCount<Integer> test = new MonoCount<>(Flux.just(1, 2, 3));
+
+	    assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
 	public void scanCountSubscriber() {
 		CoreSubscriber<Long> actual = new LambdaMonoSubscriber<>(null, e -> {}, null, null);
 		MonoCount.CountSubscriber<String> test = new MonoCount.CountSubscriber<>(actual);
@@ -68,6 +78,7 @@ public class MonoCountTest {
 
 		assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
 
 		//only TERMINATED state evaluated is one from Operators: hasValue
 		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();

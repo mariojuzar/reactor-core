@@ -18,26 +18,32 @@ package reactor.core.publisher;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.reactivestreams.Subscription;
+
 import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
 import reactor.core.Scannable;
+import reactor.core.publisher.Operators.ScalarSubscription;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.subscriber.AssertSubscriber;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
 public class FluxJustTest {
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void nullValue() {
-        Flux.just((Integer)null);
-    }
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			Flux.just((Integer) null);
+		});
+	}
 
     @Test
     @SuppressWarnings("unchecked")
     public void valueSame() throws Exception {
-        Assert.assertSame(1, ((Callable<Integer>)Flux.just(1)).call());
+        assertThat(((Callable<Integer>)Flux.just(1)).call()).isEqualTo(1);
     }
 
     @Test
@@ -85,25 +91,53 @@ public class FluxJustTest {
         Flux<String> stream = Flux.just("test");
         AtomicReference<String> value = new AtomicReference<>();
         stream.subscribe(value::set);
-        assertThat(value.get()).isEqualTo("test");
+        assertThat(value).hasValue("test");
     }
 
     @Test
     public void scanOperator() {
     	FluxJust<String> s = new FluxJust<>("foo");
     	assertThat(s.scan(Scannable.Attr.BUFFERED)).isEqualTo(1);
+    	assertThat(s.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
     }
 
 	@Test
 	public void scanSubscription() {
 		CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, sub -> sub.request(100));
-		FluxJust.WeakScalarSubscription<Integer> test = new FluxJust.WeakScalarSubscription<>(1, actual);
+		ScalarSubscription<Integer> test = new ScalarSubscription<>(actual, 1);
 
 		assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
-		assertThat(test.scan(Scannable.Attr.TERMINATED)).isFalse();
-		assertThat(test.scan(Scannable.Attr.CANCELLED)).isFalse();
+		assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).as("TERMINATED initial").isFalse();
+		assertThat(test.scan(Scannable.Attr.CANCELLED)).as("CANCELLED initial").isFalse();
+		test.poll();
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).as("TERMINATED after poll").isTrue();
+		assertThat(test.scan(Scannable.Attr.CANCELLED)).as("CANCELLED after poll").isFalse();
 		test.cancel();
-		assertThat(test.scan(Scannable.Attr.CANCELLED)).isTrue();
-		assertThat(test.scan(Scannable.Attr.TERMINATED)).isTrue();
+		assertThat(test.scan(Scannable.Attr.TERMINATED)).as("TERMINATED after cancel").isFalse();
+		assertThat(test.scan(Scannable.Attr.CANCELLED)).as("CANCELLED after cancel").isTrue();
 	}
+	
+	@Test
+	public void testConcurrencyCausingDuplicate() {
+		// See https://github.com/reactor/reactor-core/pull/2576
+		// reactor.core.Exceptions$OverflowException: Queue is full: Reactive Streams source doesn't respect backpressure
+		for (int round = 0; round < 20000; round++) {
+			Mono.just(0).flatMapMany(i -> {
+				return Flux.range(0, 10)
+						.publishOn(Schedulers.boundedElastic())
+						.concatWithValues(10)
+						.concatWithValues(11)
+						.concatWithValues(12)
+						.concatWithValues(13)
+						.concatWithValues(14)
+						.concatWithValues(15)
+						.concatWithValues(16)
+						.concatWithValues(17)
+						.concatWith(Flux.range(18, 100 - 18));
+			}).publishOn(Schedulers.boundedElastic(), 16).subscribeOn(Schedulers.boundedElastic()).blockLast();
+		}
+	}
+
 }

@@ -17,7 +17,7 @@ package reactor.core.publisher;
 
 import java.time.Duration;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
@@ -76,11 +76,10 @@ public class MonoThenIgnoreTest {
 	public void cancel() {
 		TestPublisher<String> cancelTester = TestPublisher.create();
 
-		MonoProcessor<Void> processor = cancelTester.flux()
-		                                            .then()
-		                                            .toProcessor();
-		processor.subscribe();
-		processor.cancel();
+		StepVerifier.create(cancelTester.flux()
+										.then())
+					.thenCancel()
+					.verify();
 
 		cancelTester.assertCancelled();
 	}

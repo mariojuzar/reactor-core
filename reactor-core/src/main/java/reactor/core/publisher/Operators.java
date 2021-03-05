@@ -40,6 +40,7 @@ import reactor.core.Exceptions;
 import reactor.core.Fuseable;
 import reactor.core.Fuseable.QueueSubscription;
 import reactor.core.Scannable;
+import reactor.core.Scannable.Attr.RunStyle;
 import reactor.util.Logger;
 import reactor.util.Loggers;
 import reactor.util.annotation.Nullable;
@@ -632,7 +633,7 @@ public abstract class Operators {
 		}
 		if (hook == null) {
 			log.error("Operator called default onErrorDropped", e);
-			throw Exceptions.bubble(e);
+			return;
 		}
 		hook.accept(e);
 	}
@@ -873,13 +874,13 @@ public abstract class Operators {
 	 * @return a {@link Throwable} to propagate through onError if the strategy is
 	 * terminal and cancelled the subscription, null if not.
 	 */
-	public static <T> Throwable onNextInnerError(Throwable error, Context context, Subscription subscriptionForCancel) {
+	public static <T> Throwable onNextInnerError(Throwable error, Context context, @Nullable Subscription subscriptionForCancel) {
 		error = unwrapOnNextError(error);
 		OnNextFailureStrategy strategy = onNextErrorStrategy(context);
 		if (strategy.test(error, null)) {
 			//some strategies could still return an exception, eg. if the consumer throws
 			Throwable t = strategy.process(error, null, context);
-			if (t != null) {
+			if (t != null && subscriptionForCancel != null) {
 				subscriptionForCancel.cancel();
 			}
 			return t;
@@ -1098,6 +1099,22 @@ public abstract class Operators {
 	}
 
 	/**
+	 * Represents a fuseable Subscription that emits a single constant value synchronously
+	 * to a Subscriber or consumer. Also give the subscription a user-defined {@code stepName}
+	 * for the purpose of {@link Scannable#stepName()}.
+	 *
+	 * @param subscriber the delegate {@link Subscriber} that will be requesting the value
+	 * @param value the single value to be emitted
+	 * @param stepName the {@link String} to represent the {@link Subscription} in {@link Scannable#stepName()}
+	 * @param <T> the value type
+	 * @return a new scalar {@link Subscription}
+	 */
+	public static <T> Subscription scalarSubscription(CoreSubscriber<? super T> subscriber,
+			T value, String stepName){
+		return new ScalarSubscription<>(subscriber, value, stepName);
+	}
+	
+	/**
 	 * Safely gate a {@link Subscriber} by making sure onNext signals are delivered
 	 * sequentially (serialized).
 	 * Serialization uses thread-stealing and a potentially unbounded queue that might
@@ -1286,15 +1303,16 @@ public abstract class Operators {
 	}
 
 	/**
-	 * If the actual {@link CoreSubscriber} is not {@link Fuseable.ConditionalSubscriber},
+	 * If the actual {@link CoreSubscriber} is not {@link reactor.core.Fuseable.ConditionalSubscriber},
 	 * it will apply an adapter which directly maps all
-	 * {@link Fuseable.ConditionalSubscriber#tryOnNext(T)} to {@link CoreSubscriber#onNext(T)}
+	 * {@link reactor.core.Fuseable.ConditionalSubscriber#tryOnNext(Object)} to
+	 * {@link Subscriber#onNext(Object)}
 	 * and always returns true as the result
 	 *
 	 * @param <T> passed subscriber type
 	 *
 	 * @param actual the {@link Subscriber} to adapt
-	 * @return a potentially adapted {@link Fuseable.ConditionalSubscriber}
+	 * @return a potentially adapted {@link reactor.core.Fuseable.ConditionalSubscriber}
 	 */
 	@SuppressWarnings("unchecked")
 	public static <T> Fuseable.ConditionalSubscriber<? super  T> toConditionalSubscriber(CoreSubscriber<? super T> actual) {
@@ -1314,9 +1332,9 @@ public abstract class Operators {
 
 
 
-	static Context multiSubscribersContext(InnerProducer<?>[] subscribers){
-		if (subscribers.length > 0){
-			return subscribers[0].actual().currentContext();
+	static Context multiSubscribersContext(InnerProducer<?>[] multicastInners){
+		if (multicastInners.length > 0){
+			return multicastInners[0].actual().currentContext();
 		}
 		return Context.empty();
 	}
@@ -1347,18 +1365,18 @@ public abstract class Operators {
 		}
 	}
 
-
 	/**
 	 * An unexpected exception is about to be dropped from an operator that has multiple
 	 * subscribers (and thus potentially multiple Context with local onErrorDropped handlers).
 	 *
 	 * @param e the dropped exception
+	 * @param multicastInners the inner targets of the multicast
 	 * @see #onErrorDropped(Throwable, Context)
 	 */
-	static void onErrorDroppedMulticast(Throwable e) {
+	static void onErrorDroppedMulticast(Throwable e, InnerProducer<?>[] multicastInners) {
 		//TODO let this method go through multiple contexts and use their local handlers
 		//if at least one has no local handler, also call onErrorDropped(e, Context.empty())
-		onErrorDropped(e, Context.empty());
+		onErrorDropped(e, multiSubscribersContext(multicastInners));
 	}
 
 	/**
@@ -1370,12 +1388,13 @@ public abstract class Operators {
 	 *
 	 * @param <T> the dropped value type
 	 * @param t the dropped data
+	 * @param multicastInners the inner targets of the multicast
 	 * @see #onNextDropped(Object, Context)
 	 */
-	static <T> void onNextDroppedMulticast(T t) {
+	static <T> void onNextDroppedMulticast(T t,	InnerProducer<?>[] multicastInners) {
 		//TODO let this method go through multiple contexts and use their local handlers
 		//if at least one has no local handler, also call onNextDropped(t, Context.empty())
-		onNextDropped(t, Context.empty());
+		onNextDropped(t, multiSubscribersContext(multicastInners));
 	}
 
 	static <T> long producedCancellable(AtomicLongFieldUpdater<T> updater, T instance, long n) {
@@ -1525,6 +1544,11 @@ public abstract class Operators {
 		public void request(long n) {
 			// deliberately no op
 		}
+
+		@Override
+		public String stepName() {
+			return "cancelledSubscription";
+		}
 	}
 
 	final static class EmptySubscription implements QueueSubscription<Object>, Scannable {
@@ -1574,6 +1598,10 @@ public abstract class Operators {
 			return 0;
 		}
 
+		@Override
+		public String stepName() {
+			return "emptySubscription";
+		}
 	}
 
 	/**
@@ -1715,8 +1743,13 @@ public abstract class Operators {
 
 		protected final CoreSubscriber<? super O> actual;
 
-		protected O value;
-		volatile int state; //see STATE field updater
+		/**
+		 * The value stored by this Mono operator. Strongly prefer using {@link #setValue(Object)}
+		 * rather than direct writes to this field, when possible.
+		 */
+		@Nullable
+		protected O   value;
+		volatile  int state; //see STATE field updater
 
 		public MonoSubscriber(CoreSubscriber<? super O> actual) {
 			this.actual = actual;
@@ -1753,7 +1786,7 @@ public abstract class Operators {
 		 * Make sure this method is called at most once
 		 * @param v the value to emit
 		 */
-		public final void complete(O v) {
+		public final void complete(@Nullable O v) {
 			for (; ; ) {
 				int state = this.state;
 				if (state == FUSED_EMPTY) {
@@ -1797,7 +1830,7 @@ public abstract class Operators {
 		 *
 		 * @param v the value to discard
 		 */
-		protected void discard(O v) {
+		protected void discard(@Nullable O v) {
 			Operators.onDiscard(v, actual.currentContext());
 		}
 
@@ -1856,6 +1889,9 @@ public abstract class Operators {
 			if (validate(n)) {
 				for (; ; ) {
 					int s = state;
+					if (s == CANCELLED) {
+						return;
+					}
 					// if the any bits 1-31 are set, we are either in fusion mode (FUSED_*)
 					// or request has been called (HAS_REQUEST_*)
 					if ((s & ~NO_REQUEST_HAS_VALUE) != 0) {
@@ -1889,11 +1925,16 @@ public abstract class Operators {
 
 		/**
 		 * Set the value internally, without impacting request tracking state.
+		 * This however discards the provided value when detecting a cancellation.
 		 *
 		 * @param value the new value.
 		 * @see #complete(Object)
 		 */
-		public void setValue(O value) {
+		public void setValue(@Nullable O value) {
+			if (STATE.get(this) == CANCELLED) {
+				discard(value);
+				return;
+			}
 			this.value = value;
 		}
 
@@ -2182,6 +2223,7 @@ public abstract class Operators {
 		    int missed = 1;
 
 	        long requestAmount = 0L;
+	        long alreadyInRequestAmount = 0L;
 	        Subscription requestTarget = null;
 
 	        for (; ; ) {
@@ -2236,11 +2278,12 @@ public abstract class Operators {
 	                    }
 		                subscription = ms;
 		                if (r != 0L) {
-			                requestAmount = addCap(requestAmount, r);
+			                requestAmount = addCap(requestAmount, r - alreadyInRequestAmount);
 	                        requestTarget = ms;
 	                    }
 	                } else if (mr != 0L && a != null) {
 	                    requestAmount = addCap(requestAmount, mr);
+	                    alreadyInRequestAmount += mr; 
 	                    requestTarget = a;
 	                }
 	            }
@@ -2285,10 +2328,19 @@ public abstract class Operators {
 
 		final T value;
 
+		@Nullable
+		final String stepName;
+
 		volatile int once;
+
 		ScalarSubscription(CoreSubscriber<? super T> actual, T value) {
+			this(actual, value, null);
+		}
+
+		ScalarSubscription(CoreSubscriber<? super T> actual, T value, String stepName) {
 			this.value = Objects.requireNonNull(value, "value");
 			this.actual = Objects.requireNonNull(actual, "actual");
+			this.stepName = stepName;
 		}
 
 		@Override
@@ -2330,8 +2382,9 @@ public abstract class Operators {
 		@Override
 		@Nullable
 		public Object scanUnsafe(Attr key) {
-			if (key == Attr.TERMINATED || key == Attr.CANCELLED)
-				return once == 1;
+			if (key == Attr.TERMINATED) return once == 1;
+			if (key == Attr.CANCELLED) return once == 2;
+			if (key == Attr.RUN_STYLE) return RunStyle.SYNC;
 
 			return InnerProducer.super.scanUnsafe(key);
 		}
@@ -2360,6 +2413,11 @@ public abstract class Operators {
 		@Override
 		public int size() {
 			return isEmpty() ? 0 : 1;
+		}
+
+		@Override
+		public String stepName() {
+			return stepName != null ? stepName : ("scalarSubscription(" + value + ")");
 		}
 
 		@SuppressWarnings("rawtypes")

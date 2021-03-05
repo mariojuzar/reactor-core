@@ -65,22 +65,18 @@ final class MonoTimeout<T, U, V> extends InternalMonoOperator<T, T> {
 	@Override
 	@SuppressWarnings("unchecked")
 	public CoreSubscriber<? super T> subscribeOrReturn(CoreSubscriber<? super T> actual) {
+		return new FluxTimeout.TimeoutMainSubscriber<T, T>(
+				Operators.serialize(actual),
+				firstTimeout,
+				NEVER,
+				other,
+				addNameToTimeoutDescription(source, timeoutDescription)
+		);
+	}
 
-		CoreSubscriber<T> serial = Operators.serialize(actual);
-
-		FluxTimeout.TimeoutMainSubscriber<T, V> main =
-				new FluxTimeout.TimeoutMainSubscriber<>(serial, NEVER, other,
-						addNameToTimeoutDescription(source, timeoutDescription));
-
-		serial.onSubscribe(main);
-
-		FluxTimeout.TimeoutTimeoutSubscriber ts =
-				new FluxTimeout.TimeoutTimeoutSubscriber(main, 0L);
-
-		main.setTimeout(ts);
-
-		firstTimeout.subscribe(ts);
-
-		return main;
+	@Override
+	public Object scanUnsafe(Attr key) {
+		if (key == Attr.RUN_STYLE) return Attr.RunStyle.SYNC;
+		return super.scanUnsafe(key);
 	}
 }

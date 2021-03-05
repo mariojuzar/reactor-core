@@ -20,12 +20,15 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.assertj.core.api.Assertions;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Scannable;
 import reactor.test.publisher.FluxOperatorTest;
 import reactor.test.subscriber.AssertSubscriber;
+
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class FluxSkipLastTest extends FluxOperatorTest<String, String> {
 	@Override
@@ -50,15 +53,19 @@ public class FluxSkipLastTest extends FluxOperatorTest<String, String> {
 	}
 
 
-	@Test(expected = NullPointerException.class)
+	@Test
 	public void sourceNull() {
-		new FluxSkipLast<>(null, 1);
+		assertThatExceptionOfType(NullPointerException.class).isThrownBy(() -> {
+			new FluxSkipLast<>(null, 1);
+		});
 	}
 
-	@Test(expected = IllegalArgumentException.class)
+	@Test
 	public void negativeNumber() {
-		Flux.never()
-		    .skipLast(-1);
+		assertThatExceptionOfType(IllegalArgumentException.class).isThrownBy(() -> {
+			Flux.never()
+					.skipLast(-1);
+		});
 	}
 
 	@Test
@@ -176,6 +183,15 @@ public class FluxSkipLastTest extends FluxOperatorTest<String, String> {
 	}
 
 	@Test
+	public void scanOperator(){
+		Flux<Integer> parent = Flux.just(1);
+		FluxSkipLast<Integer> test = new FluxSkipLast<>(parent, 3);
+
+		Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
+	}
+
+	@Test
     public void scanSubscriber() {
         CoreSubscriber<Integer> actual = new LambdaSubscriber<>(null, e -> {}, null, null);
         FluxSkipLast.SkipLastSubscriber<Integer> test = new FluxSkipLast.SkipLastSubscriber<>(actual, 7);
@@ -184,6 +200,7 @@ public class FluxSkipLastTest extends FluxOperatorTest<String, String> {
 
         Assertions.assertThat(test.scan(Scannable.Attr.PARENT)).isSameAs(parent);
         Assertions.assertThat(test.scan(Scannable.Attr.ACTUAL)).isSameAs(actual);
+		Assertions.assertThat(test.scan(Scannable.Attr.RUN_STYLE)).isSameAs(Scannable.Attr.RunStyle.SYNC);
         Assertions.assertThat(test.scan(Scannable.Attr.PREFETCH)).isEqualTo(7);
         test.offer(1);
         Assertions.assertThat(test.scan(Scannable.Attr.BUFFERED)).isEqualTo(1);

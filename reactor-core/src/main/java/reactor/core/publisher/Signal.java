@@ -21,8 +21,10 @@ import java.util.function.Supplier;
 
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
+
 import reactor.util.annotation.Nullable;
 import reactor.util.context.Context;
+import reactor.util.context.ContextView;
 
 /**
  * A domain representation of a Reactive Stream signal.
@@ -44,9 +46,8 @@ public interface Signal<T> extends Supplier<T>, Consumer<Subscriber<? super T>> 
 	 *
 	 * @return an {@code OnCompleted} variety of {@code Signal}
 	 */
-	@SuppressWarnings({"deprecation", "unchecked"})
 	static <T> Signal<T> complete() {
-		return (Signal<T>) ImmutableSignal.ON_COMPLETE;
+		return ImmutableSignal.onComplete();
 	}
 
 	/**
@@ -58,10 +59,9 @@ public interface Signal<T> extends Supplier<T>, Consumer<Subscriber<? super T>> 
 	 *
 	 * @return an {@code OnCompleted} variety of {@code Signal}
 	 */
-	@SuppressWarnings({"deprecation", "unchecked"})
 	static <T> Signal<T> complete(Context context) {
 		if (context.isEmpty()) {
-			return (Signal<T>) ImmutableSignal.ON_COMPLETE;
+			return ImmutableSignal.onComplete();
 		}
 		return new ImmutableSignal<>(context, SignalType.ON_COMPLETE, null, null, null);
 	}
@@ -158,9 +158,8 @@ public interface Signal<T> extends Supplier<T>, Consumer<Subscriber<? super T>> 
 	 * @param o the object to check
 	 * @return true if object represents the completion signal
 	 */
-	@SuppressWarnings("deprecation")
 	static boolean isComplete(Object o) {
-		return o == ImmutableSignal.ON_COMPLETE ||
+		return o == ImmutableSignal.onComplete() ||
 				(o instanceof Signal && ((Signal) o).getType() == SignalType.ON_COMPLETE);
 	}
 
@@ -230,12 +229,24 @@ public interface Signal<T> extends Supplier<T>, Consumer<Subscriber<? super T>> 
 	SignalType getType();
 
 	/**
-	 * Return the {@link Context} that is accessible by the time this {@link Signal} was
+	 * Return the readonly {@link Context} that is accessible by the time this {@link Signal} was
 	 * emitted.
 	 *
-	 * @return the {@link Context}, or an empty one if no context is available.
+	 * @return an immutable {@link Context}, or an empty one if no context is available.
+	 * @deprecated use {@link #getContextView()} instead. To be removed in 3.5.0
 	 */
-	Context getContext();
+	@Deprecated
+	default Context getContext() {
+		return Context.of(getContextView());
+	}
+
+	/**
+	 * Return the readonly {@link ContextView} that is accessible by the time this {@link Signal} was
+	 * emitted.
+	 *
+	 * @return a readonly {@link ContextView}, or an empty one if no context is available.
+	 */
+	ContextView getContextView();
 
 	/**
 	 * Indicates whether this signal represents an {@code onError} event.

@@ -20,7 +20,7 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -94,7 +94,7 @@ public class Context0Test {
 	@Test
 	public void putAllOf() {
 		Context m = Context.of("A", 1, "B", 2, "C", 3);
-		Context put = c.putAll(m);
+		Context put = c.putAll(m.readOnly());
 
 		assertThat(put).isInstanceOf(Context3.class)
 		               .hasToString("Context3{A=1, B=2, C=3}");
@@ -103,7 +103,7 @@ public class Context0Test {
 	@Test
 	public void putAllOfEmpty() {
 		Context m = Context.empty();
-		Context put = c.putAll(m);
+		Context put = c.putAll(m.readOnly());
 
 		assertThat(put).isSameAs(c);
 	}
